@@ -15,12 +15,14 @@
   .kv{display:grid;grid-template-columns:140px 1fr;gap:8px 12px}
   .kv div:nth-child(odd){color:var(--muted)}
   .ok{color:#0a8d4c}.bad{color:#d93025}
+  .note{font-size:12px;margin-top:6px}
 </style>
 
 <body>
   <div class="card">
     <h2>✅ ยืนยันการแลก (Admin)</h2>
     <div id="info" class="muted">ตรวจสอบข้อมูลการแลกรางวัลให้ถูกต้อง</div>
+    <div class="note muted" id="ver">เชื่อมต่อ…</div>
 
     <div id="detail" style="margin-top:12px" class="kv">
       <div>SAP</div><div id="sap">—</div>
@@ -52,6 +54,7 @@ const firebaseConfig = {
   projectId: "anespoint-bfd3d",
   appId: "1:1234567890:web:abcdef123456"
 };
+// 👉 เปลี่ยนให้ตรงกับ Deploy ล่าสุดของ Apps Script ( /exec )
 const GAS_ENDPOINT = "https://script.google.com/macros/s/AKfycbyxrm9HZ9q6Lov8KZ9ngQSPdAcOuz0fDcedK95f6heFo75crr7LCOopa1WDrhCpTRakoQ/exec";
 
 const app = initializeApp(firebaseConfig);
@@ -60,15 +63,20 @@ const db  = getDatabase(app);
 const $ = q => document.querySelector(q);
 const fmt = n => Number(n||0).toLocaleString('th-TH');
 
+/* ===== JSONP helper ===== */
 function api(body){
   return new Promise((resolve,reject)=>{
     const cb='cb_'+Math.random().toString(36).slice(2);
     window[cb]=d=>{ resolve(d); delete window[cb]; s.remove(); };
     const qs=new URLSearchParams({...body,callback:cb}).toString();
     const s=document.createElement('script');
-    s.src=`${GAS_ENDPOINT}?${qs}`; s.onerror=()=>reject(new Error('GAS error')); document.body.appendChild(s);
+    s.src=`${GAS_ENDPOINT}?${qs}`;
+    s.onerror=()=>reject(new Error('GAS error'));
+    document.body.appendChild(s);
   });
 }
+
+/* ===== payload จาก QR ===== */
 function decodePayload(){
   try{
     const params=new URLSearchParams(location.hash.slice(1));
@@ -77,6 +85,8 @@ function decodePayload(){
     return JSON.parse(json);
   }catch(e){ return null; }
 }
+
+/* ===== โหลดรายชื่อแอดมิน ===== */
 async function loadAdmins(){
   const sel = $('#adminSel');
   sel.innerHTML = '<option value="">— เลือกแอดมิน —</option>';
@@ -90,6 +100,20 @@ async function loadAdmins(){
     const opt=document.createElement('option');
     opt.value=name; opt.textContent=name; sel.appendChild(opt);
   });
+}
+
+/* ===== ตรวจ version ของปลายทาง (กันยิงผิดตัว) ===== */
+async function checkVersion(){
+  try{
+    const r = await api({action:'version'});
+    if(r && r.ok){
+      $('#ver').textContent = `เชื่อมต่อ Apps Script: ${r.version || 'unknown'} @ ${r.time || ''}`;
+    }else{
+      $('#ver').textContent = 'เชื่อมต่อ Apps Script ไม่สำเร็จ';
+    }
+  }catch(e){
+    $('#ver').textContent = 'เชื่อมต่อ Apps Script ไม่สำเร็จ';
+  }
 }
 
 /* ===== main ===== */
@@ -109,20 +133,40 @@ if(!data){
     $('#name').textContent = '(อ่านชื่อไม่สำเร็จ)'; $('#name').classList.add('bad');
   }
 }
+await checkVersion();
 await loadAdmins();
+
+/* ===== ยืนยันการแลก (ลองส่ง 3 รูปแบบ: action / act / a) ===== */
+async function confirmRedeem(payload){
+  // 1) action
+  let r = await api({action:'confirmRedeem', ...payload});
+  if(r && (r.ok || r.error!=='unknown_action')) return r;
+
+  // 2) act
+  r = await api({act:'confirmRedeem', ...payload});
+  if(r && (r.ok || r.error!=='unknown_action')) return r;
+
+  // 3) a
+  r = await api({a:'confirmRedeem', ...payload});
+  return r;
+}
 
 $('#btnConfirm').onclick = async()=>{
   if(!data) return;
   const admin = $('#adminSel').value.trim();
   if(!admin){ $('#status').textContent = 'กรุณาเลือกแอดมิน'; return; }
   $('#status').textContent='กำลังยืนยัน...';
-  const r = await api({action:'confirmRedeem', sap:data.sap, rewardName:data.reward, admin, ts:data.ts, points:data.pts});
+
+  const payload = { sap:data.sap, rewardName:data.reward, admin, ts:data.ts, points:data.pts };
+  const r = await confirmRedeem(payload);
+
   if(r && r.ok){
     $('#status').innerHTML = `สำเร็จ ✓ | แต้มคงเหลือผู้ใช้: <b>${fmt(r.totalAfter)}</b> | สต็อกรางวัลคงเหลือ: <b>${fmt(r.stockAfter)}</b>`;
     $('#status').classList.remove('bad'); $('#status').classList.add('ok');
     $('#btnConfirm').disabled = true; $('#adminSel').disabled = true;
   }else{
-    $('#status').textContent = 'ไม่สำเร็จ: ' + (r && r.error ? r.error : 'เกิดข้อผิดพลาด');
+    const extra = r && (r.received || (r.echo ? JSON.stringify(r.echo) : ""));
+    $('#status').textContent = 'ไม่สำเร็จ: ' + (r && r.error ? r.error : 'เกิดข้อผิดพลาด') + (extra ? ` (${extra})` : '');
     $('#status').classList.remove('ok'); $('#status').classList.add('bad');
   }
 };
