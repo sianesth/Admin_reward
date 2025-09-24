@@ -11,6 +11,7 @@
   .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
   select,button{border-radius:10px;border:1px solid var(--line);padding:9px 12px;font:inherit}
   button{cursor:pointer;background:var(--brand);color:#fff;border-color:transparent}
+  button[disabled]{opacity:.7;cursor:not-allowed}
   .muted{color:var(--muted)}
   .kv{display:grid;grid-template-columns:140px 1fr;gap:8px 12px}
   .kv div:nth-child(odd){color:var(--muted)}
@@ -54,7 +55,7 @@ const firebaseConfig = {
   projectId: "anespoint-bfd3d",
   appId: "1:1234567890:web:abcdef123456"
 };
-// 👉 เปลี่ยนให้ตรงกับ Deploy ล่าสุดของ Apps Script ( /exec )
+// 👉 ใส่ URL Deploy ล่าสุดของ Apps Script (ลงท้ายด้วย /exec เท่านั้น)
 const GAS_ENDPOINT = "https://script.google.com/macros/s/AKfycbzAawZ3sMTGNnxzhr5t2QTZMYQgGCBcvfCS8QqL-MbBGCyFpEnvHqRPrYXM3t0o5fSf5A/exec";
 
 const app = initializeApp(firebaseConfig);
@@ -63,16 +64,19 @@ const db  = getDatabase(app);
 const $ = q => document.querySelector(q);
 const fmt = n => Number(n||0).toLocaleString('th-TH');
 
-/* ===== JSONP helper ===== */
-function api(body){
+/* ===== JSONP helper (พร้อม timeout) ===== */
+function api(body, timeoutMs=15000){
   return new Promise((resolve,reject)=>{
     const cb='cb_'+Math.random().toString(36).slice(2);
-    window[cb]=d=>{ resolve(d); delete window[cb]; s.remove(); };
+    let settled=false, timer=null;
+    window[cb]=d=>{ if(settled) return; settled=true; clearTimeout(timer); resolve(d); cleanup(); };
     const qs=new URLSearchParams({...body,callback:cb}).toString();
     const s=document.createElement('script');
+    function cleanup(){ try{ delete window[cb]; }catch{} s.remove(); }
     s.src=`${GAS_ENDPOINT}?${qs}`;
-    s.onerror=()=>reject(new Error('GAS error'));
+    s.onerror=()=>{ if(settled) return; settled=true; clearTimeout(timer); reject(new Error('GAS network error')); cleanup(); };
     document.body.appendChild(s);
+    timer=setTimeout(()=>{ if(settled) return; settled=true; reject(new Error('GAS timeout')); cleanup(); }, timeoutMs);
   });
 }
 
@@ -102,17 +106,17 @@ async function loadAdmins(){
   });
 }
 
-/* ===== ตรวจ version ของปลายทาง (กันยิงผิดตัว) ===== */
+/* ===== ตรวจ version ของปลายทาง ===== */
 async function checkVersion(){
   try{
     const r = await api({action:'version'});
     if(r && r.ok){
-      $('#ver').textContent = `เชื่อมต่อ Apps Script: ${r.version || 'unknown'} @ ${r.time || ''}`;
+      $('#ver').textContent = `เชื่อมต่อข้อมูล: ${r.version || 'unknown'} @ ${r.time || ''}`;
     }else{
-      $('#ver').textContent = 'เชื่อมต่อ Apps Script ไม่สำเร็จ';
+      $('#ver').textContent = 'เชื่อมต่อข้อมูล ไม่สำเร็จ';
     }
   }catch(e){
-    $('#ver').textContent = 'เชื่อมต่อ Apps Script ไม่สำเร็จ';
+    $('#ver').textContent = 'เชื่อมต่อข้อมูล ไม่สำเร็จ';
   }
 }
 
@@ -136,39 +140,42 @@ if(!data){
 await checkVersion();
 await loadAdmins();
 
-/* ===== ยืนยันการแลก (ลองส่ง 3 รูปแบบ: action / act / a) ===== */
+/* ===== ยืนยันการแลก (กันดับเบิลคลิก + สถานะชัด) ===== */
+let confirming=false;
 async function confirmRedeem(payload){
-  // 1) action
-  let r = await api({action:'confirmRedeem', ...payload});
+  let r = await api({action:'confirmRedeem', ...payload}).catch(()=>null);
   if(r && (r.ok || r.error!=='unknown_action')) return r;
-
-  // 2) act
-  r = await api({act:'confirmRedeem', ...payload});
+  r = await api({act:'confirmRedeem', ...payload}).catch(()=>null);
   if(r && (r.ok || r.error!=='unknown_action')) return r;
-
-  // 3) a
-  r = await api({a:'confirmRedeem', ...payload});
+  r = await api({a:'confirmRedeem', ...payload}).catch(()=>null);
   return r;
 }
-
 $('#btnConfirm').onclick = async()=>{
-  if(!data) return;
+  if(!data || confirming) return;
   const admin = $('#adminSel').value.trim();
   if(!admin){ $('#status').textContent = 'กรุณาเลือกแอดมิน'; return; }
+  confirming=true;
+  const btn=$('#btnConfirm'); const sel=$('#adminSel');
+  btn.disabled=true; sel.disabled=true;
   $('#status').textContent='กำลังยืนยัน...';
-
-  const payload = { sap:data.sap, rewardName:data.reward, admin, ts:data.ts, points:data.pts };
-  const r = await confirmRedeem(payload);
-
-  if(r && r.ok){
-    $('#status').innerHTML = `สำเร็จ ✓ | แต้มคงเหลือผู้ใช้: <b>${fmt(r.totalAfter)}</b> | สต็อกรางวัลคงเหลือ: <b>${fmt(r.stockAfter)}</b>`;
-    $('#status').classList.remove('bad'); $('#status').classList.add('ok');
-    $('#btnConfirm').disabled = true; $('#adminSel').disabled = true;
-  }else{
-    const extra = r && (r.received || (r.echo ? JSON.stringify(r.echo) : ""));
-    $('#status').textContent = 'ไม่สำเร็จ: ' + (r && r.error ? r.error : 'เกิดข้อผิดพลาด') + (extra ? ` (${extra})` : '');
+  try{
+    const payload = { sap:data.sap, rewardName:data.reward, admin, ts:data.ts, points:data.pts };
+    const r = await confirmRedeem(payload);
+    if(r && r.ok){
+      $('#status').innerHTML = `สำเร็จ ✓ | แต้มคงเหลือผู้ใช้: <b>${fmt(r.totalAfter)}</b> | สต็อกรางวัลคงเหลือ: <b>${fmt(r.stockAfter)}</b>`;
+      $('#status').classList.remove('bad'); $('#status').classList.add('ok');
+    }else{
+      const extra = r && (r.received || (r.echo ? JSON.stringify(r.echo) : ""));
+      $('#status').textContent = 'ไม่สำเร็จ: ' + (r && r.error ? r.error : 'เกิดข้อผิดพลาด') + (extra ? ` (${extra})` : '');
+      $('#status').classList.remove('ok'); $('#status').classList.add('bad');
+      btn.disabled=false; sel.disabled=false; confirming=false; return;
+    }
+  }catch(e){
+    $('#status').textContent = 'ไม่สำเร็จ: ' + (e && e.message ? e.message : 'เกิดข้อผิดพลาด');
     $('#status').classList.remove('ok'); $('#status').classList.add('bad');
+    btn.disabled=false; sel.disabled=false; confirming=false; return;
   }
+  // สำเร็จแล้วปล่อย disabled ไว้
 };
 </script>
 </body>
