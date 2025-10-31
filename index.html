@@ -16,6 +16,52 @@
   .kv div:nth-child(odd){color:var(--muted)}
   .ok{color:#0a8d4c}.bad{color:#d93025}
   .note{font-size:12px;margin-top:6px}
+
+body{
+  font-family: "Sarabun", system-ui, -apple-system, "Segoe UI", Inter, sans-serif;
+  background: var(--bg);
+  color: var(--txt);
+}
+h2{
+  font-weight: 700;
+  font-size: 20px;
+  color: #0f1733;
+  margin-top: 0;
+}
+.card{
+  box-shadow: 0 4px 18px rgba(0,0,0,.05);
+}
+button{
+  transition: background .2s, transform .1s;
+}
+button:hover{ filter: brightness(1.05); }
+button:active{ transform: translateY(1px); }
+
+<style>
+  /* ทำให้คอนเทนต์ขยายเต็มจอ และสูงอย่างน้อยเท่าหน้าจอ */
+  html, body { height: 100%; }
+  body { margin: 0; background:#f6f8fd; }
+
+  /* คอนเทนต์หลักให้กว้าง 100% ไม่จำกัด max-width */
+  main, .wrap, .container, .page, .content {
+    max-width: none !important;
+    width: 100% !important;
+  }
+
+  /* เว้นระยะรอบ ๆ ให้ดูโปร่ง และให้สูงขั้นต่ำเต็ม viewport */
+  main, .wrap, .page, .content {
+    padding: 20px clamp(14px, 4vw, 28px) 28px;
+    min-height: 100vh;               /* สูงอย่างน้อยเต็มจอ */
+    box-sizing: border-box;
+  }
+
+  /* การ์ดฟอร์มให้ขยายเต็มความกว้าง */
+  .card, .panel, .box {
+    width: 100%;
+    border-radius: 16px;
+    border: 1px solid #e9eef7;
+    box-shadow: 0 8px 24px rgba(15,23,51,.06);
+  }
 </style>
 
 <body>
@@ -31,13 +77,13 @@
       <div>แต้มที่ใช้</div><div id="points">—</div>
     </div>
 
-    <div class="row" style="margin-top:14px">
-      <label for="adminSel" class="muted">รับแลกโดย</label>
-      <select id="adminSel" style="min-width:220px">
-        <option value="">— เลือกแอดมิน —</option>
-      </select>
-      <button id="btnConfirm">ยืนยันการแลก</button>
-    </div>
+    <div class="row" style="margin-top:14px; align-items:center; gap:10px">
+        <label for="adminSap" class="muted">รับแลกโดย (SAP แอดมิน)</label>
+        <input id="adminSap" inputmode="numeric" pattern="[0-9]{4,}" placeholder="เช่น 600000"
+               style="min-width:220px;padding:8px 10px;border:1px solid #dbe2f1;border-radius:10px">
+        <small id="adminNameHint" class="muted" style="min-width:180px;"></small>
+        <button id="btnConfirm">ยืนยันการแลก</button>
+      </div>
 
     <div id="status" class="muted" style="margin-top:10px"></div>
   </div>
@@ -50,20 +96,20 @@ import { getDatabase, ref, get } from "https://www.gstatic.com/firebasejs/10.12.
 const firebaseConfig = {
   apiKey: "AIzaSyCMTpAce-Q-fTkS7xDDYuEpPwgtBIrDP04",
   authDomain: "anespoint-bfd3d.firebaseapp.com",
-  databaseURL: "https://anespoint-bfd3d-default-rtdb.asia-southeast1.firebasedatabase.app",
+  databaseURL: "https://anesaplus-default-rtdb.asia-southeast1.firebasedatabase.app",
   projectId: "anespoint-bfd3d",
   appId: "1:1234567890:web:abcdef123456"
 };
-// 👉 เปลี่ยนให้ตรงกับ Deploy ล่าสุดของ Apps Script ( /exec )
-const GAS_ENDPOINT = "https://script.google.com/macros/s/AKfycbzAawZ3sMTGNnxzhr5t2QTZMYQgGCBcvfCS8QqL-MbBGCyFpEnvHqRPrYXM3t0o5fSf5A/exec";
+// 👉 ใช้ Web App (Deployment ล่าสุด) ที่ลงท้ายด้วย /exec
+const GAS_ENDPOINT = "https://script.google.com/macros/s/AKfycbwPOW_Wk7bZYb3zG4qRciOENbBSMo2TRdfdJxXzC1C5tRxav1R_dlF5SuuXKoEkJi84Ig/exec";
 
 const app = initializeApp(firebaseConfig);
 const db  = getDatabase(app);
 
-const $ = q => document.querySelector(q);
-const fmt = n => Number(n||0).toLocaleString('th-TH');
+const $   = (q)=>document.querySelector(q);
+const fmt = (n)=>Number(n||0).toLocaleString('th-TH');
 
-/* ===== JSONP helper ===== */
+/* ===== JSONP helper (GAS) ===== */
 function api(body){
   return new Promise((resolve,reject)=>{
     const cb='cb_'+Math.random().toString(36).slice(2);
@@ -76,7 +122,7 @@ function api(body){
   });
 }
 
-/* ===== payload จาก QR ===== */
+/* ===== Decode payload จาก QR (hash #p=...) ===== */
 function decodePayload(){
   try{
     const params=new URLSearchParams(location.hash.slice(1));
@@ -86,90 +132,110 @@ function decodePayload(){
   }catch(e){ return null; }
 }
 
-/* ===== โหลดรายชื่อแอดมิน ===== */
-async function loadAdmins(){
-  const sel = $('#adminSel');
-  sel.innerHTML = '<option value="">— เลือกแอดมิน —</option>';
-  let list = null;
-  try{
-    const r = await api({action:'getAdmins'});
-    if(r && r.ok && Array.isArray(r.items) && r.items.length){ list = r.items; }
-  }catch(_){}
-  if(!list){ list = ['ดุษฎี  อรรจน์อังกูร','จุฑาวุฒิ  อุ่นอมรมาศ','ANES-Front']; }
-  list.forEach(name=>{
-    const opt=document.createElement('option');
-    opt.value=name; opt.textContent=name; sel.appendChild(opt);
-  });
-}
-
-/* ===== ตรวจ version ของปลายทาง (กันยิงผิดตัว) ===== */
+/* ===== ตรวจ version ของปลายทาง (กันยิงผิดสคริปต์) ===== */
 async function checkVersion(){
+  const el = $('#ver');
   try{
     const r = await api({action:'version'});
-    if(r && r.ok){
-      $('#ver').textContent = `เชื่อมต่อ Apps Script: ${r.version || 'unknown'} @ ${r.time || ''}`;
-    }else{
-      $('#ver').textContent = 'เชื่อมต่อ Apps Script ไม่สำเร็จ';
-    }
-  }catch(e){
-    $('#ver').textContent = 'เชื่อมต่อ Apps Script ไม่สำเร็จ';
-  }
+    el.textContent = (r && r.ok) ? 'เชื่อมต่อฐานข้อมูล' : 'เชื่อมต่อ Apps Script ไม่สำเร็จ';
+  }catch{ el.textContent = 'เชื่อมต่อ Apps Script ไม่สำเร็จ'; }
 }
 
-/* ===== main ===== */
-const data = decodePayload();
-if(!data){
-  $('#status').textContent = 'ไม่พบข้อมูลจาก QR';
-}else{
+/* ===== ตรวจสิทธิ์แอดมินจาก Google Sheet (action: verifyAdmin) ===== */
+async function verifyAdminBySAP(adminSAP){
+  try{
+    const r = await api({action:'verifyAdmin', sap: adminSAP});
+    if(r && r.ok && r.adminName) return r.adminName;
+  }catch(_){}
+  return null;
+}
+
+/* ===== แสดงชื่อแอดมินทันทีเมื่อกรอก SAP ===== */
+let _admTimer = null;
+$('#adminSap').addEventListener('input', (e)=>{
+  e.target.value = (e.target.value||'').replace(/\D/g,'');  // รับเฉพาะตัวเลข
+  const sap = e.target.value;
+  const hint = $('#adminNameHint');
+  hint.textContent = '';
+  hint.style.color = '';
+
+  if (sap.length < 4){
+    if (sap.length){ hint.textContent = 'กรุณากรอกอย่างน้อย 4 หลัก'; hint.style.color = '#6b78a6'; }
+    return;
+  }
+  clearTimeout(_admTimer);
+  _admTimer = setTimeout(async ()=>{
+    hint.textContent = 'กำลังตรวจสอบ...'; hint.style.color = '#6b78a6';
+    const name = await verifyAdminBySAP(sap);
+    if (name){ hint.textContent = `✓ ${name}`; hint.style.color = '#0a8c4a'; }
+    else { hint.textContent = '✗ ไม่พบสิทธิ์แอดมิน'; hint.style.color = '#d93025'; }
+  }, 250);
+});
+
+/* ===== กดยืนยันการแลก ===== */
+$('#btnConfirm').addEventListener('click', async ()=>{
+  const statusEl = $('#status');
+  statusEl.textContent = 'กำลังตรวจสอบ...';
+
+  const adminSAP = ($('#adminSap').value||'').trim();
+  if(!/^\d{4,}$/.test(adminSAP)){
+    statusEl.textContent = 'กรุณากรอก SAP แอดมินให้ถูกต้อง';
+    return;
+  }
+
+  const payload = decodePayload();
+  if(!payload){ statusEl.textContent = 'ไม่พบข้อมูลจาก QR'; return; }
+
+  // ตรวจสิทธิ์แอดมิน
+  const adminName = await verifyAdminBySAP(adminSAP);
+  if(!adminName){ statusEl.textContent = 'SAP นี้ไม่ใช่แอดมินที่ได้รับอนุญาต'; return; }
+
+  // ยิงยืนยันการแลก → GAS เขียน Redemptions + หักแต้ม
+  statusEl.textContent = 'กำลังบันทึกการแลก...';
+  try{
+    const r = await api({
+      action:'confirmRedeem',
+      sap: payload.sap,
+      reward: payload.reward,
+      points: payload.pts,
+      adminSAP: adminSAP
+    });
+    if(r && r.ok){
+      statusEl.textContent = `แลกสำเร็จ โดย ${adminName}`;
+    }else{
+      statusEl.textContent = r && r.error ? r.error : 'แลกไม่สำเร็จ';
+    }
+  }catch(e){
+    statusEl.textContent = 'เกิดข้อผิดพลาดในการเชื่อมต่อ';
+  }
+});
+
+/* ===== main/init ===== */
+(async function init(){
+  const data = decodePayload();
+  if(!data){
+    $('#status').textContent = 'ไม่พบข้อมูลจาก QR';
+    return;
+  }
   $('#sap').textContent    = data.sap || '—';
   $('#reward').textContent = data.reward || '—';
   $('#points').textContent = fmt(data.pts || 0);
+
+  // ดึงชื่อผู้ใช้จาก RTDB
   try{
-    const snap = await get(ref(db, 'public/usersSummary/'+data.sap));
+    const snap = await get(ref(db, 'public/usersSummary/'+(data.sap||'')));
     const v = snap.exists() ? snap.val() : {};
     $('#name').textContent = v.name || '(ไม่พบชื่อในระบบ)';
-    if(!snap.exists()){ $('#name').classList.add('bad'); } else { $('#name').classList.add('ok'); }
-  }catch(e){
-    $('#name').textContent = '(อ่านชื่อไม่สำเร็จ)'; $('#name').classList.add('bad');
+    $('#name').classList.add(snap.exists() ? 'ok' : 'bad');
+  }catch{
+    $('#name').textContent = '(อ่านชื่อไม่สำเร็จ)';
+    $('#name').classList.add('bad');
   }
-}
-await checkVersion();
-await loadAdmins();
 
-/* ===== ยืนยันการแลก (ลองส่ง 3 รูปแบบ: action / act / a) ===== */
-async function confirmRedeem(payload){
-  // 1) action
-  let r = await api({action:'confirmRedeem', ...payload});
-  if(r && (r.ok || r.error!=='unknown_action')) return r;
-
-  // 2) act
-  r = await api({act:'confirmRedeem', ...payload});
-  if(r && (r.ok || r.error!=='unknown_action')) return r;
-
-  // 3) a
-  r = await api({a:'confirmRedeem', ...payload});
-  return r;
-}
-
-$('#btnConfirm').onclick = async()=>{
-  if(!data) return;
-  const admin = $('#adminSel').value.trim();
-  if(!admin){ $('#status').textContent = 'กรุณาเลือกแอดมิน'; return; }
-  $('#status').textContent='กำลังยืนยัน...';
-
-  const payload = { sap:data.sap, rewardName:data.reward, admin, ts:data.ts, points:data.pts };
-  const r = await confirmRedeem(payload);
-
-  if(r && r.ok){
-    $('#status').innerHTML = `สำเร็จ ✓ | แต้มคงเหลือผู้ใช้: <b>${fmt(r.totalAfter)}</b> | สต็อกรางวัลคงเหลือ: <b>${fmt(r.stockAfter)}</b>`;
-    $('#status').classList.remove('bad'); $('#status').classList.add('ok');
-    $('#btnConfirm').disabled = true; $('#adminSel').disabled = true;
-  }else{
-    const extra = r && (r.received || (r.echo ? JSON.stringify(r.echo) : ""));
-    $('#status').textContent = 'ไม่สำเร็จ: ' + (r && r.error ? r.error : 'เกิดข้อผิดพลาด') + (extra ? ` (${extra})` : '');
-    $('#status').classList.remove('ok'); $('#status').classList.add('bad');
-  }
-};
+  await checkVersion();
+})();
 </script>
+
+</head>
 </body>
 </html>
