@@ -7,22 +7,68 @@
   :root{--line:#e6e9f2;--txt:#0f1733;--muted:#6b78a6;--brand:#1f6fff;--bg:#f6f8fd;--card:#fff}
   *{box-sizing:border-box}
   body{font:15px/1.6 system-ui,Segoe UI,Inter;margin:0;background:var(--bg);color:var(--txt)}
-  .card{max-width:720px;margin:24px auto;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;box-shadow:0 4px 18px rgba(0,0,0,.05)}
+  .card{max-width:720px;margin:24px auto;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px}
   .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
   select,button{border-radius:10px;border:1px solid var(--line);padding:9px 12px;font:inherit}
-  button{cursor:pointer;background:var(--brand);color:#fff;border-color:transparent;transition:background .2s,transform .1s}
-  button:hover{filter:brightness(1.05)} button:active{transform:translateY(1px)}
+  button{cursor:pointer;background:var(--brand);color:#fff;border-color:transparent}
   .muted{color:var(--muted)}
   .kv{display:grid;grid-template-columns:140px 1fr;gap:8px 12px}
   .kv div:nth-child(odd){color:var(--muted)}
   .ok{color:#0a8d4c}.bad{color:#d93025}
+  .note{font-size:12px;margin-top:6px}
+
+body{
+  font-family: "Sarabun", system-ui, -apple-system, "Segoe UI", Inter, sans-serif;
+  background: var(--bg);
+  color: var(--txt);
+}
+h2{
+  font-weight: 700;
+  font-size: 20px;
+  color: #0f1733;
+  margin-top: 0;
+}
+.card{
+  box-shadow: 0 4px 18px rgba(0,0,0,.05);
+}
+button{
+  transition: background .2s, transform .1s;
+}
+button:hover{ filter: brightness(1.05); }
+button:active{ transform: translateY(1px); }
+
+<style>
+  /* ทำให้คอนเทนต์ขยายเต็มจอ และสูงอย่างน้อยเท่าหน้าจอ */
+  html, body { height: 100%; }
+  body { margin: 0; background:#f6f8fd; }
+
+  /* คอนเทนต์หลักให้กว้าง 100% ไม่จำกัด max-width */
+  main, .wrap, .container, .page, .content {
+    max-width: none !important;
+    width: 100% !important;
+  }
+
+  /* เว้นระยะรอบ ๆ ให้ดูโปร่ง และให้สูงขั้นต่ำเต็ม viewport */
+  main, .wrap, .page, .content {
+    padding: 20px clamp(14px, 4vw, 28px) 28px;
+    min-height: 100vh;               /* สูงอย่างน้อยเต็มจอ */
+    box-sizing: border-box;
+  }
+
+  /* การ์ดฟอร์มให้ขยายเต็มความกว้าง */
+  .card, .panel, .box {
+    width: 100%;
+    border-radius: 16px;
+    border: 1px solid #e9eef7;
+    box-shadow: 0 8px 24px rgba(15,23,51,.06);
+  }
 </style>
 
 <body>
   <div class="card">
     <h2>✅ ยืนยันการแลก (Admin)</h2>
     <div id="info" class="muted">ตรวจสอบข้อมูลการแลกรางวัลให้ถูกต้อง</div>
-    <div class="muted" id="ver" style="font-size:12px;margin-top:6px">เชื่อมต่อ…</div>
+    <div class="note muted" id="ver">เชื่อมต่อ…</div>
 
     <div id="detail" style="margin-top:12px" class="kv">
       <div>SAP</div><div id="sap">—</div>
@@ -32,11 +78,10 @@
     </div>
 
     <div class="row" style="margin-top:14px">
-      <label for="adminSelect" class="muted">รับแลกโดย (เลือกแอดมิน)</label>
-      <select id="adminSelect" style="min-width:260px">
-        <option value="">กำลังโหลดรายชื่อแอดมิน…</option>
+      <label for="adminSel" class="muted">รับแลกโดย</label>
+      <select id="adminSel" style="min-width:220px">
+        <option value="">— เลือกแอดมิน —</option>
       </select>
-      <small id="adminHint" class="muted"></small>
       <button id="btnConfirm">ยืนยันการแลก</button>
     </div>
 
@@ -44,6 +89,9 @@
   </div>
 
 <script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
+import { getDatabase, ref, get } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-database.js";
+
 /* ===== CONFIG ===== */
 const firebaseConfig = {
   apiKey: "AIzaSyAiSW2d16RpHjtUR7OIl2PVpvH_QPL3cp4",
@@ -52,14 +100,15 @@ const firebaseConfig = {
   projectId: "anesaplus",
   appId: "1:518123966097:web:2f93eeb56ec026aa903930"
 };
-// ใช้ Deployment ล่าสุด (ลงท้าย /exec)
+// 👉 เปลี่ยนให้ตรงกับ Deploy ล่าสุดของ Apps Script ( /exec )
 const GAS_ENDPOINT = "https://script.google.com/macros/s/AKfycbwPOW_Wk7bZYb3zG4qRciOENbBSMo2TRdfdJxXzC1C5tRxav1R_dlF5SuuXKoEkJi84Ig/exec";
+
 
 const app = initializeApp(firebaseConfig);
 const db  = getDatabase(app);
 
-const $ = (q)=>document.querySelector(q);
-const fmt = (n)=>Number(n||0).toLocaleString('th-TH');
+const $ = q => document.querySelector(q);
+const fmt = n => Number(n||0).toLocaleString('th-TH');
 
 /* ===== JSONP helper ===== */
 function api(body){
@@ -74,104 +123,103 @@ function api(body){
   });
 }
 
-/* ===== payload จาก QR (#p=...) ===== */
+/* ===== payload จาก QR ===== */
 function decodePayload(){
   try{
     const params=new URLSearchParams(location.hash.slice(1));
     const b64=params.get('p'); if(!b64) return null;
     const json=decodeURIComponent(escape(window.atob(b64)));
     return JSON.parse(json);
-  }catch{ return null; }
+  }catch(e){ return null; }
 }
 
-/* ===== version ping ===== */
-async function checkVersion(){
-  const el = $('#ver');
-  try{
-    const r = await api({action:'version'});
-    el.textContent = (r && r.ok) ? 'เชื่อมต่อฐานข้อมูล' : 'เชื่อมต่อ Apps Script ไม่สำเร็จ';
-  }catch{ el.textContent = 'เชื่อมต่อ Apps Script ไม่สำเร็จ'; }
-}
-
-/* ===== โหลดรายชื่อแอดมิน (dropdown) ===== */
+/* ===== โหลดรายชื่อแอดมิน ===== */
 async function loadAdmins(){
-  const sel = $('#adminSelect');
+  const sel = $('#adminSel');
+  sel.innerHTML = '<option value="">— เลือกแอดมิน —</option>';
   try{
     const r = await api({action:'getadmins'});
     const items = (r && r.ok && Array.isArray(r.items)) ? r.items : [];
-    if (!items.length){
-      sel.innerHTML = '<option value="">ไม่พบรายชื่อแอดมิน</option>';
+    if(!items.length){
+      sel.innerHTML = '<option value="">(ไม่พบรายชื่อแอดมิน)</option>';
       return;
     }
     sel.innerHTML = '<option value="">— เลือกแอดมิน —</option>' +
       items.map(x => `<option value="${(x.sap||'').trim()}">${(x.name||'').trim()} (${(x.sap||'').trim()})</option>`).join('');
-  }catch{
+  }catch(e){
     sel.innerHTML = '<option value="">โหลดรายชื่อแอดมินไม่สำเร็จ</option>';
   }
 }
 
-/* ===== กดยืนยันการแลก ===== */
-$('#btnConfirm').addEventListener('click', async ()=>{
-  const statusEl = $('#status');
-  statusEl.textContent = 'กำลังตรวจสอบ...';
-
-  const adminSAP = ($('#adminSelect').value||'').trim();
-  const adminText = $('#adminSelect').selectedOptions[0]?.textContent || '';
-  if(!adminSAP){
-    statusEl.textContent = 'กรุณาเลือกแอดมิน';
-    return;
-  }
-
-  const payload = decodePayload();
-  if(!payload){ statusEl.textContent = 'ไม่พบข้อมูลจาก QR'; return; }
-
-  // ยิงยืนยันการแลก
-  statusEl.textContent = 'กำลังบันทึกการแลก...';
+/* ===== ตรวจ version ของปลายทาง (กันยิงผิดตัว) ===== */
+async function checkVersion(){
   try{
-    const r = await api({
-      action:'confirmredeem',
-      sap: payload.sap,
-      reward: payload.reward,
-      points: payload.pts,
-      adminSAP: adminSAP
-    });
+    const r = await api({action:'version'});
     if(r && r.ok){
-      statusEl.textContent = `แลกสำเร็จ โดย ${adminText}`;
+      $('#ver').textContent = `เชื่อมต่อฐานข้อมูล`;
     }else{
-      statusEl.textContent = r && r.error ? r.error : 'แลกไม่สำเร็จ';
+      $('#ver').textContent = 'เชื่อมต่อ Apps Script ไม่สำเร็จ';
     }
-  }catch{
-    statusEl.textContent = 'เกิดข้อผิดพลาดในการเชื่อมต่อ';
+  }catch(e){
+    $('#ver').textContent = 'เชื่อมต่อ Apps Script ไม่สำเร็จ';
   }
-});
+}
 
 /* ===== main ===== */
-(async function init(){
-  const data = decodePayload();
-  if(!data){ $('#status').textContent = 'ไม่พบข้อมูลจาก QR'; return; }
+const data = decodePayload();
+if(!data){
+  $('#status').textContent = 'ไม่พบข้อมูลจาก QR';
+}else{
   $('#sap').textContent    = data.sap || '—';
   $('#reward').textContent = data.reward || '—';
   $('#points').textContent = fmt(data.pts || 0);
-
-  // ชื่อผู้ใช้จาก RTDB
-  // แทนส่วนที่เคยอ่านจาก RTDB
-try{
-  const r = await api({ action:'userstatus', sap: data.sap });  // <- อ่านจากชีต Users ผ่าน Apps Script
-  if (r && r.ok) {
-    $('#name').textContent = r.name || data.sap;
-    $('#name').classList.add(r.active ? 'ok' : 'bad');
-  } else {
-    $('#name').textContent = '(อ่านชื่อไม่สำเร็จ)';
-    $('#name').classList.add('bad');
+  try{
+    const snap = await get(ref(db, 'public/usersSummary/'+data.sap));
+    const v = snap.exists() ? snap.val() : {};
+    $('#name').textContent = v.name || '(ไม่พบชื่อในระบบ)';
+    if(!snap.exists()){ $('#name').classList.add('bad'); } else { $('#name').classList.add('ok'); }
+  }catch(e){
+    $('#name').textContent = '(อ่านชื่อไม่สำเร็จ)'; $('#name').classList.add('bad');
   }
-}catch(_){
-  $('#name').textContent = '(อ่านชื่อไม่สำเร็จ)';
-  $('#name').classList.add('bad');
+}
+await checkVersion(); 
+await loadAdmins();
+
+/* ===== ยืนยันการแลก (ลองส่ง 3 รูปแบบ: action / act / a) ===== */
+async function confirmRedeem(payload){
+  // 1) action
+  let r = await api({action:'confirmRedeem', ...payload});
+  if(r && (r.ok || r.error!=='unknown_action')) return r;
+
+  // 2) act
+  r = await api({act:'confirmRedeem', ...payload});
+  if(r && (r.ok || r.error!=='unknown_action')) return r;
+
+  // 3) a
+  r = await api({a:'confirmRedeem', ...payload});
+  return r;
 }
 
-  await checkVersion();
-  await loadAdmins();
-})();
+$('#btnConfirm').onclick = async()=>{
+  if(!data) return;
+  const adminSAP = ($('#adminSel').value||'').trim();
+  const adminText = $('#adminSel').selectedOptions[0]?.textContent || '';
+  if(!adminSAP){ $('#status').textContent = 'กรุณาเลือกแอดมิน'; return; }
+  $('#status').textContent='กำลังยืนยัน...';
+
+  const payload = { sap:data.sap, rewardName:data.reward, adminSAP:adminSAP, ts:data.ts, points:data.pts };
+  const r = await confirmRedeem(payload);
+
+  if(r && r.ok){
+    if(r && r.ok){ $('#status').innerHTML = `สำเร็จ ✓ โดย ${adminText} | สต็อกรางวัลคงเหลือ: <b>${fmt(r.stockAfter)}</b>`;
+    $('#status').classList.remove('bad'); $('#status').classList.add('ok');
+    $('#btnConfirm').disabled = true; $('#adminSel').disabled = true;
+  }else{
+    const extra = r && (r.received || (r.echo ? JSON.stringify(r.echo) : ""));
+    $('#status').textContent = 'ไม่สำเร็จ: ' + (r && r.error ? r.error : 'เกิดข้อผิดพลาด') + (extra ? ` (${extra})` : '');
+    $('#status').classList.remove('ok'); $('#status').classList.add('bad');
+  }
+};
 </script>
 </body>
 </html>
