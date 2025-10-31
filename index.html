@@ -1,1230 +1,176 @@
-/****************************
- * ANESA+ — Apps Script (ONE FILE)
- * Base: Script_001 (user)
- * Patch: 2025-10-30  (keep original structure; add Winners/FirstN, Rewards realtime, non-active guard,
- * Submissions schema fix, queue/direct submit, FormsBridge→FormAwards, onEdit/onChange triggers)
- ****************************/
+<!doctype html>
+<html lang="th">
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Admin — ยืนยันการแลก</title>
+<style>
+  :root{--line:#e6e9f2;--txt:#0f1733;--muted:#6b78a6;--brand:#1f6fff;--bg:#f6f8fd;--card:#fff}
+  *{box-sizing:border-box}
+  body{font:15px/1.6 system-ui,Segoe UI,Inter;margin:0;background:var(--bg);color:var(--txt)}
+  .card{max-width:720px;margin:24px auto;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;box-shadow:0 4px 18px rgba(0,0,0,.05)}
+  .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+  select,button{border-radius:10px;border:1px solid var(--line);padding:9px 12px;font:inherit}
+  button{cursor:pointer;background:var(--brand);color:#fff;border-color:transparent;transition:background .2s,transform .1s}
+  button:hover{filter:brightness(1.05)} button:active{transform:translateY(1px)}
+  .muted{color:var(--muted)}
+  .kv{display:grid;grid-template-columns:140px 1fr;gap:8px 12px}
+  .kv div:nth-child(odd){color:var(--muted)}
+  .ok{color:#0a8d4c}.bad{color:#d93025}
+</style>
 
-/* ========== CONFIG / PROPS ========== */
-function PROP_(k, d){ const p=PropertiesService.getScriptProperties(); const v=p.getProperty(k); return (v==null||v==='')?d:v; }
-const SPREADSHEET_ID = PROP_('SPREADSHEET_ID','1e0k2_H38renST6ERAwUbnPEm6hzJGMtMOvAD81D6lOk'); // ← ยึดตาม 001
-function SS(){ return SpreadsheetApp.openById(SPREADSHEET_ID); }
-const TZ = 'Asia/Bangkok';
-const CFG = {
-  SHEET:{ USERS:'Users', REWARDS:'Rewards', ACTIVITIES:'Activities', FORMS:'FormAwards', FORM_TITLES:'FORM_TITLES', SUBMISSIONS:'Submissions' },
-  PATH: {
-    USERS_SUMMARY:'public/usersSummary',
-    REWARDS:'public/rewards',
-    ACTIVITIES:'public/activities',
-    ACTS_BY_DATE:'public/activitiesByDate',
-    ACT_INDEX:'public/actIndex',
-    FORMS_ALL:'public/FormAwards',
-    FORMS_BY_USER:'public/annualByUser',
-    ANSWERS_QUEUE:'public/answersQueue',
-    USER_LAST:'public/userLastSubmission',
-    WEEKLY_BY_USER:'public/weeklyByUser',
-    SUBMISSIONS:'public/submissions',
-    WINNERS_BY_DATE:'public/winnersByDate',
-  },
-  TOP_WINNERS_LIMIT: 20
+<body>
+  <div class="card">
+    <h2>✅ ยืนยันการแลก (Admin)</h2>
+    <div id="info" class="muted">ตรวจสอบข้อมูลการแลกรางวัลให้ถูกต้อง</div>
+    <div class="muted" id="ver" style="font-size:12px;margin-top:6px">เชื่อมต่อ…</div>
+
+    <div id="detail" style="margin-top:12px" class="kv">
+      <div>SAP</div><div id="sap">—</div>
+      <div>ชื่อผู้แลก</div><div id="name" class="muted">กำลังดึง...</div>
+      <div>รางวัล</div><div id="reward">—</div>
+      <div>แต้มที่ใช้</div><div id="points">—</div>
+    </div>
+
+    <div class="row" style="margin-top:14px">
+      <label for="adminSelect" class="muted">รับแลกโดย (เลือกแอดมิน)</label>
+      <select id="adminSelect" style="min-width:260px">
+        <option value="">กำลังโหลดรายชื่อแอดมิน…</option>
+      </select>
+      <small id="adminHint" class="muted"></small>
+      <button id="btnConfirm">ยืนยันการแลก</button>
+    </div>
+
+    <div id="status" class="muted" style="margin-top:10px"></div>
+  </div>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
+import { getDatabase, ref, get } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-database.js";
+
+/* ===== CONFIG ===== */
+const firebaseConfig = {
+  apiKey: "AIzaSyAiSW2d16RpHjtUR7OIl2PVpvH_QPL3cp4",
+  authDomain: "anesaplus.firebaseapp.com",
+  // ⚠️ แก้ให้มี h ตรง https
+  databaseURL: "https://anesaplus-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId: "anesaplus",
+  appId: "1:518123966097:web:2f93eeb56ec026aa903930"
 };
+// ใช้ Deployment ล่าสุด (ลงท้าย /exec)
+const GAS_ENDPOINT = "https://script.google.com/macros/s/AKfycbwPOW_Wk7bZYb3zG4qRciOENbBSMo2TRdfdJxXzC1C5tRxav1R_dlF5SuuXKoEkJi84Ig/exec";
 
-function toBool_(v){
-  var s=String(v).trim().toLowerCase();
-  if (v===true) return true;
-  if (v===false) return false;
-  return ['true','1','yes','on','active','ใช้งาน','เปิด','enabled','enable'].includes(s);
-}
+const app = initializeApp(firebaseConfig);
+const db  = getDatabase(app);
 
-/* ========== UTIL: TIME / PARSE ========== */
-function fmtIso_(d){ return Utilities.formatDate(d, TZ, "yyyy-MM-dd'T'HH:mm:ssXXX"); }
-function fmtDayKey_(d){ return Utilities.formatDate(d, TZ, 'yyyy-MM-dd'); }
-function parseDateFlexible_(s){
-  s=String(s||'').trim(); if(!s) return null;
-  if(/^\d{4}-\d{2}-\d{2}(?:\s+\d{1,2}:\d{2})?$/.test(s)) return new Date(s.replace(' ','T'));
-  const m=s.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{2,4})(?:\s+(\d{1,2}):(\d{2}))?$/);
-  if(m){ const dd=+m[1],MM=+m[2]-1,yyyy=m[3].length<=2?2000+ +m[3]:+m[3],hh=+(m[4]||0),mi=+(m[5]||0); return new Date(yyyy,MM,dd,hh,mi,0,0); }
-  const d=new Date(s); return isNaN(+d)?null:d;
-}
-function normalizeIsoTz_(s){
-  s=String(s||'').trim(); if(!s) return '';
-  const d=parseDateFlexible_(s); if(d) return Utilities.formatDate(d,TZ,"yyyy-MM-dd'T'HH:mmXXX");
-  if(/^\d{4}-\d{2}-\d{2}\s+\d{1,2}:\d{2}/.test(s)) s=s.replace(' ','T');
-  if(/^\d{4}-\d{2}-\d{2}$/.test(s)) s+='T00:00';
-  if(!/[zZ]|[+\-]\d{2}:?\d{2}$/.test(s)) s+='+07:00';
-  s=s.replace(/([+\-]\d{2})(\d{2})$/,'$1:$2').replace(/([+\-])(\d)(?=:)/,(_,sg,h)=>sg+'0'+h);
-  s=s.replace(/([+\-]\d{2}):(\d{2})$/,(_,hh,mm)=> hh+':'+(['00','30','45'].includes(mm)?mm:'00'));
-  return s;
-}
+const $ = (q)=>document.querySelector(q);
+const fmt = (n)=>Number(n||0).toLocaleString('th-TH');
 
-/* ========== UTIL: SHEET ========== */
-function getSheet_(name){ const sh=SS().getSheetByName(name); if(!sh) throw new Error('Sheet not found: '+name); return sh; }
-function getOrCreateSheet_(name, header){ var ss=SS(); var sh=ss.getSheetByName(name); if(!sh) sh=ss.insertSheet(name); if(header && header.length && sh.getLastRow()===0) sh.getRange(1,1,1,header.length).setValues([header]); return sh; }
-function readObjects_(sheetName){
-  const sh=getSheet_(sheetName), values=sh.getDataRange().getDisplayValues(); if(!values.length) return [];
-  const head=values[0].map(h=>String(h||'').trim()); const rows=[];
-  for(let i=1;i<values.length;i++){ const o={}; for(let j=0;j<head.length;j++){ o[head[j]]=values[i][j]; } rows.push(o); }
-  return rows;
-}
-function pick_(row, keys){ for(let i=0;i<keys.length;i++){ const k=keys[i]; if(k in row && String(row[k]).trim()!=='') return row[k]; } return ''; }
-function toNum_(v,def){ const n=Number(v); return isNaN(n)?def:n; }
-
-/** อ่านชื่อแอดมินจากชีต getAdmins */
-function getAdminNameBySAP_(sap){
-  // รับและ normalize เป็นตัวเลขล้วน
-  sap = String(sap||'').replace(/\D/g,'').trim();
-  if (!sap) return '';
-
-  var sh = SS().getSheetByName('getAdmins');
-  if (!sh) return '';
-
-  // ใช้ displayValues เพื่อคงค่าตามที่เห็นในชีต
-  var v = sh.getDataRange().getDisplayValues();
-  if (v.length < 2) return '';
-
-  var h = v[0];
-  var iSAP  = h.indexOf('SAP');
-  var iName = h.indexOf('Name');
-  if (iSAP < 0 || iName < 0) return '';
-
-  for (var r = 1; r < v.length; r++){
-    var sapInSheet = String(v[r][iSAP]).replace(/\D/g,'').trim();
-    if (sapInSheet === sap){
-      return String(v[r][iName] || '').trim();
-    }
-  }
-  return '';
-}
-
-/** endpoint สำหรับตรวจสิทธิ์แอดมิน */
-function verifyAdmin_(e){
-  var sap = (e.parameter.sap || '').trim();
-  var name = getAdminNameBySAP_(sap);
-  return _jsonpOut_(e, name ? { ok:true, adminName:name } : { ok:false, error:'not_admin' });
-}
-
-/* ========== UTIL: USER STATUS (guard) ========== */
-function normalizeStatus_(v){
-  const s=String(v||'').trim().toLowerCase();
-  return ['active','true','1','ใช้งาน','เปิด','enabled','enable','yes','on'].includes(s) ? 'Active' : 'Non-active';
-}
-function getUserStatus_(sap){
-  const sh=getSheet_(CFG.SHEET.USERS), v=sh.getDataRange().getDisplayValues();
-  if(v.length<=1) return 'Non-active';
-  const h=v[0]; const iSAP=h.indexOf('SAP'), iST=h.indexOf('Status');
-  if(iSAP<0||iST<0) return 'Non-active';
-  for(let r=1;r<v.length;r++){ if(String(v[r][iSAP]).trim()===String(sap).trim()) return normalizeStatus_(v[r][iST]); }
-  return 'Non-active';
-}
-
-/** ======= Duplicate guard (per user/act per local day) ======= **/
-function _tz(){ return 'Asia/Bangkok'; }
-function _todayKey(){ return Utilities.formatDate(new Date(), _tz(), 'yyyy-MM-dd'); }
-
-function _anyToDate(x){
-  if (!x) return null;
-  if (x instanceof Date) return x;
-  if (typeof x === 'number') return new Date(x);
-  var s = String(x).trim();
-  if (!s) return null;
-  if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(s)) return new Date(s.replace(' ','T') + '+07:00');
-  if (/^\d{4}-\d{2}-\d{2}T/.test(s)) s = s.replace(/([+\-]\d{2})(\d{2})$/,'$1:$2');
-  var d = new Date(s);
-  return isNaN(d) ? null : d;
-}
-
-function _isSameLocalDay(d){
-  if(!d) return false;
-  var t = Utilities.formatDate(new Date(d), _tz(), 'yyyy-MM-dd');
-  var now = Utilities.formatDate(new Date(), _tz(), 'yyyy-MM-dd');
-  return t === now;
-}
-
-/** อ่านท้ายตาราง (เร็ว) + cache 10 นาที */
-function alreadyAnsweredToday_(sap, actId){
-  sap = String(sap||'').trim(); actId = String(actId||'').trim();
-  if(!sap || !actId) return false;
-
-  var cache = CacheService.getScriptCache();
-  var key = 'ans:'+_todayKey()+':'+sap+':'+actId;
-  var hit = cache.get(key);
-  if (hit === '1') return true;
-
-  var sh = getOrCreateSheet_(CFG.SHEET.SUBMISSIONS,
-    ['Timestamp','SAP','ActID','Answer','Correct','Points','Source','Category','GroupId','Finalized']);
-  var lastRow = sh.getLastRow();
-  if (lastRow <= 1) return false;
-
-  var startRow = Math.max(2, lastRow - 5000); // สแกนเฉพาะท้ายสุด 5k แถว
-  var range = sh.getRange(startRow, 1, lastRow - startRow + 1, 3).getValues(); // A:TS,B:SAP,C:ActID
-
-  for (var i=range.length-1;i>=0;i--){
-    var r = range[i];
-    if (String(r[1]) !== sap || String(r[2]) !== actId) continue;
-    var d = _anyToDate(r[0]);
-    if (_isSameLocalDay(d)) { cache.put(key, '1', 60*10); return true; }
-  }
-  return false;
-}
-
-function markAnsweredToday_(sap, actId){
-  if(!sap || !actId) return;
-  CacheService.getScriptCache().put('ans:'+_todayKey()+':'+sap+':'+actId, '1', 60*10);
-}
-
-/* ========== Submissions schema (fix boolean trap) ========== */
-function fixSubmissionsSchema_(){
-  var sh=getOrCreateSheet_(CFG.SHEET.SUBMISSIONS,['Timestamp','SAP','ActID','Answer','Correct','Points','Source','Category','GroupId','Finalized']);
-  var h=sh.getRange(1,1,1,sh.getLastColumn()).getDisplayValues()[0];
-  var iOK=h.indexOf('Correct')+1, iPts=h.indexOf('Points')+1, iFin=h.indexOf('Finalized')+1;
-  var rows=Math.max(1, sh.getMaxRows()-1);
-  if(iOK>0){ var rg=sh.getRange(2,iOK,rows,1); rg.setNumberFormat('@'); rg.clearDataValidations(); }
-  if(iPts>0){ sh.getRange(2,iPts,rows,1).setNumberFormat('0'); }
-  if(iFin>0){ var rg2=sh.getRange(2,iFin,rows,1); rg2.setNumberFormat('@'); rg2.clearDataValidations(); }
-}
-function appendSubmissionRowForceText_(rowArr){
-  fixSubmissionsSchema_();
-  const sh=getOrCreateSheet_(CFG.SHEET.SUBMISSIONS,['Timestamp','SAP','ActID','Answer','Correct','Points','Source','Category','GroupId','Finalized']);
-  const h=sh.getRange(1,1,1,sh.getLastColumn()).getDisplayValues()[0];
-  const iOK=h.indexOf('Correct')+1, iFin=h.indexOf('Finalized')+1;
-  const r=sh.getLastRow()+1;
-  sh.getRange(r,1,1,rowArr.length).setValues([rowArr]);
-  if(iOK>0){ const rg=sh.getRange(r,iOK,1,1); rg.setNumberFormat('@'); rg.clearDataValidations(); }
-  if(iFin>0){ const rg2=sh.getRange(r,iFin,1,1); rg2.setNumberFormat('@'); rg2.clearDataValidations(); }
-  SpreadsheetApp.flush(); return r;
-}
-
-/* ========== RTDB helpers ========== */
-function rtdbUrl_(path){ const base=PROP_('RTDB_URL','').trim().replace(/\/+$/,''); if(!base) throw new Error('RTDB_URL not set'); return `${base}/${String(path).replace(/^\/+/, '')}.json`; }
-function getAccessToken_(){
-  const email=PROP_('FIREBASE_CLIENT_EMAIL',''); const pk=PROP_('FIREBASE_PRIVATE_KEY','').replace(/\\n/g,'\n');
-  if(!email||!pk) return '';
-  const now=Math.floor(Date.now()/1000);
-  const enc=o=>Utilities.base64EncodeWebSafe(JSON.stringify(o)).replace(/=+$/,'');
-  const jwtHeader={alg:'RS256',typ:'JWT'};
-  const claims={iss:email,sub:email,aud:'https://oauth2.googleapis.com/token',iat:now,exp:now+3600,
-    scope:'https://www.googleapis.com/auth/firebase.database https://www.googleapis.com/auth/userinfo.email'};
-  const toSign=enc(jwtHeader)+'.'+enc(claims);
-  const sig=Utilities.base64EncodeWebSafe(Utilities.computeRsaSha256Signature(toSign, pk)).replace(/=+$/,'');
-  const jwt=toSign+'.'+sig;
-  const res=UrlFetchApp.fetch('https://oauth2.googleapis.com/token',{method:'post',payload:{grant_type:'urn:ietf:params:oauth:grant-type:jwt-bearer',assertion:jwt}});
-  return JSON.parse(res.getContentText()).access_token;
-}
-function _authQuery(){ const t=PROP_('DB_AUTH',''); return t?`?auth=${encodeURIComponent(t)}`:''; }
-function httpPut_(path,obj){
-  const url=rtdbUrl_(path), q=_authQuery(); const headers={}; if(!q){ const tok=getAccessToken_(); if(tok) headers.Authorization='Bearer '+tok; }
-  const resp=UrlFetchApp.fetch(url+q,{method:'put',contentType:'application/json',headers,payload:JSON.stringify(obj),muteHttpExceptions:true});
-  if(resp.getResponseCode()>=400) throw new Error(`PUT ${url} → ${resp.getResponseCode()} ${resp.getContentText()}`);
-}
-function httpPatch_(path,obj){
-  const url=rtdbUrl_(path), q=_authQuery(); const headers={}; if(!q){ const tok=getAccessToken_(); if(tok) headers.Authorization='Bearer '+tok; }
-  const resp=UrlFetchApp.fetch(url+q,{method:'patch',contentType:'application/json',headers,payload:JSON.stringify(obj),muteHttpExceptions:true});
-  if(resp.getResponseCode()>=400) throw new Error(`PATCH ${url} → ${resp.getResponseCode()} ${resp.getContentText()}`);
-}
-
-/* ========== SNAPSHOTS (Users/Rewards/Activities) ========== */
-function syncUsers(){
-  const C={ SAP:['SAP'], NAME:['Name','ชื่อ'], STATUS:['Status','Active'], EARNED:['PointsEarned'], USED:['PointsUsed'], TOTAL:['PointsTotal'] };
-  const rows=readObjects_(CFG.SHEET.USERS), out={};
-  rows.forEach(r=>{
-    const sap=pick_(r,C.SAP); if(!sap) return;
-    const status = normalizeStatus_(pick_(r,C.STATUS));
-    if (status !== 'Active') return;                     // ⬅️ กรองเฉพาะ Active
-    out[sap]={ 
-      sap, 
-      name: pick_(r,C.NAME)||sap, 
-      Status: 'Active',
-      PointsEarned: toNum_(pick_(r,C.EARNED),0), 
-      PointsUsed: toNum_(pick_(r,C.USED),0),
-      PointsTotal: toNum_(pick_(r,C.TOTAL),0), 
-      UpdatedAt: new Date().toISOString() 
-    };
+/* ===== JSONP helper ===== */
+function api(body){
+  return new Promise((resolve,reject)=>{
+    const cb='cb_'+Math.random().toString(36).slice(2);
+    window[cb]=d=>{ resolve(d); delete window[cb]; s.remove(); };
+    const qs=new URLSearchParams({...body,callback:cb}).toString();
+    const s=document.createElement('script');
+    s.src=`${GAS_ENDPOINT}?${qs}`;
+    s.onerror=()=>reject(new Error('GAS error'));
+    document.body.appendChild(s);
   });
-  httpPut_(CFG.PATH.USERS_SUMMARY,out);
 }
 
-function syncRewards(){
-  const C={ NAME:['RewardName','Name','Reward'], POINTS:['PointsRequired','pointsRequired','Points'], STOCK:['StockRemaining','stock','Stock'], ACTIVE:['Active'], IMAGE:['ImageURL','imageUrl','Image'] };
-  const rows=readObjects_(CFG.SHEET.REWARDS), out={};
-  rows.forEach(r=>{
-    const name=pick_(r,C.NAME); if(!name) return;
-    const isActive = toBool_(pick_(r,C.ACTIVE));
-    if (!isActive) return;                                // ⬅️ กรองเฉพาะ Active = TRUE
-    out[name]={ 
-      pointsRequired:toNum_(pick_(r,C.POINTS),0), 
-      stock:toNum_(pick_(r,C.STOCK),0),
-      Active:true, 
-      imageUrl:String(pick_(r,C.IMAGE)||''), 
-      UpdatedAt:new Date().toISOString() 
-    };
-  });
-  httpPut_(CFG.PATH.REWARDS,out);
-}
-
-function syncActivities(){
-  const C={ ACT_ID:['ActID','id','actId'], CATEGORY:['Category'], GROUP_ID:['GroupId','groupId'], TITLE:['Title','ActivityTitle','ชื่อกิจกรรม','Activity Name','Name'], QUESTION:['Question'], INPUT:['InputType'],
-            OPTA:['OptionA'], OPTB:['OptionB'], OPTC:['OptionC'], OPTD:['OptionD'], ANSWER:['Answer'], BASE:['BasePoints','Points'], BONUS:['CorrectBonus'],
-            FIRST_N:['FirstN'], FIRST_BONUS:['FirstNBonus'], FIRST_REQ:['FirstNRequiresCorrect'], WIN_START:['WindowStart'], WIN_END:['WindowEnd'], ANS_RELEASE:['AnswerReleaseAt'], ACTIVE:['Active'] };
-  const rows=readObjects_(CFG.SHEET.ACTIVITIES), ALL={}, TODAY={}, INDEX={};
-  const todayKey=fmtDayKey_(new Date());
-
-  rows.forEach(r=>{
-    const id=pick_(r,C.ACT_ID); if(!id) return;
-    const isActive = toBool_(pick_(r,C.ACTIVE));
-    if (!isActive) return;                                // ⬅️ กรองเฉพาะ Active = TRUE
-
-    const obj={
-      ActID:id, Category:pick_(r,C.CATEGORY)||'', GroupId:pick_(r,C.GROUP_ID)||'',
-      Title:pick_(r,C.TITLE)||'', Question:pick_(r,C.QUESTION)||'', InputType:pick_(r,C.INPUT)||'choice',
-      OptionA:pick_(r,C.OPTA)||'', OptionB:pick_(r,C.OPTB)||'', OptionC:pick_(r,C.OPTC)||'', OptionD:pick_(r,C.OPTD)||'',
-      Answer:pick_(r,C.ANSWER)||'', BasePoints:toNum_(pick_(r,C.BASE),0), CorrectBonus:toNum_(pick_(r,C.BONUS),0),
-      FirstN:toNum_(pick_(r,C.FIRST_N),0), FirstNBonus:toNum_(pick_(r,C.FIRST_BONUS),0), FirstNRequiresCorrect:String(pick_(r,C.FIRST_REQ) ?? 'TRUE'),
-      WindowStart:normalizeIsoTz_(pick_(r,C.WIN_START)), WindowEnd:normalizeIsoTz_(pick_(r,C.WIN_END)),
-      AnswerReleaseAt:normalizeIsoTz_(pick_(r,C.ANS_RELEASE)), Active:'TRUE', UpdatedAt:new Date().toISOString()
-    };
-
-    ALL[id]=obj;
-
-    // ทำ TODAY mirror ตาม GroupId yyyy-mm-dd หรือ WindowStart/End ตรงกับวันนี้
-    const g=String(obj.GroupId||''); const m=g.match(/\b(20\d{2}-\d{2}-\d{2})\b/);
-    const ws = parseDateFlexible_(obj.WindowStart);
-    const we = parseDateFlexible_(obj.WindowEnd);
-    const isToday = (m && m[1] === todayKey)
-       || (ws && fmtDayKey_(ws) === todayKey)
-       || (we && fmtDayKey_(we) === todayKey);
-    if(isToday) TODAY[id]=obj;
-
-    INDEX[id]={ Title: obj.Title||obj.Question||id, GroupId: obj.GroupId||'', WindowStart: obj.WindowStart||'', WindowEnd: obj.WindowEnd||'' };
-  });
-
-  httpPut_(CFG.PATH.ACTIVITIES,ALL);
-  httpPut_(`${CFG.PATH.ACTS_BY_DATE}/${todayKey}`,TODAY);
-  httpPatch_(CFG.PATH.ACT_INDEX,INDEX);
-}
-
-/* ========== ANSWER: correctness & points ========== */
-function normStr_(s){ return String(s||'').replace(/[.\u200b]/g,'').replace(/\s+/g,' ').trim().toLowerCase(); }
-function stripChoicePrefix_(s){ return String(s||'').replace(/^\s*([A-Dก-ง])[\.\)]?\s*/i,''); }
-function isCorrectAnswer_(meta, userAns){
-  const cat=String(meta.Category||'').toUpperCase();
-  if(/DAY(1|16)_LOTTO/.test(cat)){
-    const u2=String(userAns||'').replace(/\D/g,'').slice(-2);
-    const a2=String(meta.Answer||'').replace(/\D/g,'').slice(-2);
-    return (u2 && a2 && u2===a2);
-  }
-  const a=normStr_(stripChoicePrefix_(meta.Answer));
-  const u=normStr_(stripChoicePrefix_(userAns));
-  if(u && a && u===a) return true;
-  const map={A:'OptionA',B:'OptionB',C:'OptionC',D:'OptionD','ก':'OptionA','ข':'OptionB','ค':'OptionC','ง':'OptionD'};
-  const raw=String(userAns||'').trim();
-  if(raw.length===1){
-    const k=map[raw.toUpperCase()]||map[raw];
-    const full=k?normStr_(stripChoicePrefix_(meta[k]||'')):'';
-    if(full && full===a) return true;
-  }
-  const m=String(meta.Answer||'').trim().match(/^([A-Dก-ง])[\.\)]/i);
-  if(m && raw && raw.toUpperCase()===String(m[1]).toUpperCase()) return true;
-  const m2=String(meta.Answer||'').trim().match(/^([A-Dก-ง])(?:[\.\)])?$/i);
-  if(m2 && raw && raw.toUpperCase()===String(m2[1]).toUpperCase()) return true;
-  return false;
-}
-function countCorrectToday_(actId){
-  var sh=getOrCreateSheet_(CFG.SHEET.SUBMISSIONS,['Timestamp','SAP','ActID','Answer','Correct','Points','Source','Category','GroupId','Finalized']);
-  var v=sh.getDataRange().getValues(); if(v.length<=1) return 0;
-  var h=v[0]; var iTS=h.indexOf('Timestamp'), iAct=h.indexOf('ActID'), iOK=h.indexOf('Correct'), iFin=h.indexOf('Finalized');
-  var today=fmtDayKey_(new Date()); var n=0;
-  for(var r=1;r<v.length;r++){
-    var ts=v[r][iTS]; var d=parseDateFlexible_(ts); if(!d) continue;
-    if(fmtDayKey_(d)!==today) continue;
-    if(String(v[r][iAct]||'')!==String(actId||'')) continue;
-    var ok=(v[r][iOK]===true || String(v[r][iOK]).toLowerCase()==='true');
-    var fin=(v[r][iFin]===true || String(v[r][iFin]).toLowerCase()==='true');
-    if(ok && fin) n++;
-  } return n;
-}
-function hasSubmittedToday_(sap, actId){
-  return alreadyAnsweredToday_(sap, actId);
-}
-
-function calcFirstNBonus_(meta, actId, correctNow){
-  if(!correctNow) return 0;
-  var N=Number(meta.FirstN||0)||0, bonus=Number(meta.FirstNBonus||0)||0;
-  var needCorrect=String(meta.FirstNRequiresCorrect||'TRUE').toLowerCase()!=='false';
-  if(!N||!bonus) return 0;
-  if(needCorrect){ var count=countCorrectToday_(actId); return (count<N)? bonus:0; }
-  return 0;
-}
-
-/* ========== USERS: bump points ========== */
-function bumpUserPoints_(sap, delta){
-  if(!sap || !delta) return;
-  var sh=getSheet_(CFG.SHEET.USERS); var v=sh.getDataRange().getDisplayValues(); var h=v[0];
-  var iSAP=h.indexOf('SAP'), iName=h.indexOf('Name'), iStat=h.indexOf('Status');
-  var iEarn=h.indexOf('PointsEarned'), iUsed=h.indexOf('PointsUsed'), iTotal=h.indexOf('PointsTotal');
-  if(iSAP<0||iEarn<0||iUsed<0||iTotal<0) return;
-  for(var r=1;r<v.length;r++){
-    if(String(v[r][iSAP]).trim()===String(sap)){
-      var name=String(v[r][iName]||'').trim()||sap;
-      var status=String(v[r][iStat]||'Active')||'Active';
-      var earned=Number(v[r][iEarn]||0)+Number(delta||0);
-      var used=Number(v[r][iUsed]||0);
-      var total=earned-used;
-      sh.getRange(r+1,iEarn+1,1,3).setValues([[earned,used,total]]);
-      httpPatch_(`${CFG.PATH.USERS_SUMMARY}/${encodeURIComponent(sap)}`,{
-        sap,name,Status:status,PointsEarned:earned,PointsUsed:used,PointsTotal:total,UpdatedAt:new Date().toISOString()
-      });
-      break;
-    }
-  }
-}
-
-/* ========== Submit Answer (direct) ========== */
-function handleSubmitAnswer_(body){
-  var sap=String(body.sap||'').trim(), actId=String(body.actId||'').trim(), answer=String(body.answer||'').trim();
-  var tsISO=String(body.timestamp||fmtIso_(new Date())); if(!sap||!actId) return {ok:false,error:'missing sap or actId'};
-  if(getUserStatus_(sap)!=='Active') return {ok:false,error:'USER_NON_ACTIVE'};
-  if(hasSubmittedToday_(sap,actId)) return {ok:false,error:'already_answered_today', errorCode:'ALREADY_ANSWERED'};
-  var meta=readActivityMetaById_(actId)||{}; var title=meta.Title||meta.Question||actId;
-  var inputType=String(meta.InputType||'choice').toLowerCase(); var hasAnswer=String(meta.Answer||'').trim()!=='';
-  var correct=null, points=0, finalized=false;
-  if(['choice','radio','select'].includes(inputType)){
-    if(hasAnswer){ correct=isCorrectAnswer_(meta,answer); points=correct?(Number(meta.BasePoints||0)+Number(meta.CorrectBonus||0)):0; if(correct) points+=calcFirstNBonus_(meta,actId,true); finalized=true; }
-  }else if(['num','num2','number','numeric','text','lotto'].includes(inputType)){
-    if(hasAnswer){ correct=isCorrectAnswer_(meta,answer); points=correct?(Number(meta.BasePoints||0)+Number(meta.CorrectBonus||0)):0; if(correct) points+=calcFirstNBonus_(meta,actId,true); finalized=true; }
-    else { correct=null; points=0; finalized=false; }
-  }
-  appendSubmissionRowForceText_([tsISO,sap,actId,answer,(correct===true?'TRUE':(correct===false?'FALSE':'PENDING')),points,String(body.client||'web-anesa+'),meta.Category||'',meta.GroupId||'',(finalized?'TRUE':'FALSE')]);
-  markAnsweredToday_(sap, actId);   // ← ใส่บรรทัดนี้
-  if(finalized && correct===true && points>0) bumpUserPoints_(sap, points);
-  try{ const todayKey=Utilities.formatDate(new Date(tsISO),TZ,'yyyy-MM-dd'); httpPatch_(`${CFG.PATH.WINNERS_BY_DATE}/${todayKey}/${encodeURIComponent(actId)}/${sap}`,{sap,ts:tsISO}); }catch(e){}
+/* ===== payload จาก QR (#p=...) ===== */
+function decodePayload(){
   try{
-    const thKey=Utilities.formatDate(new Date(tsISO),TZ,'yyyyMMdd_HHmmss');
-    httpPatch_(`${CFG.PATH.USER_LAST}/${sap}`,{actId,ts:tsISO,title,correct:(correct===true?true:(correct===false?false:null)),points:(finalized?points:null),userAnswer:answer});
-    httpPatch_(`${CFG.PATH.WEEKLY_BY_USER}/${sap}/${thKey}`,{dateISO:tsISO,actId,title,result:(correct===true?true:(correct===false?false:null)),points:(finalized?points:0),Finalized:finalized});
-  }catch(e){}
-  try{ buildWinnersToday(); }catch(e){}
-  return { ok:true, correct:(correct===true?'TRUE':(correct===false?'FALSE':'PENDING')), points:(correct===true?points:0) };
+    const params=new URLSearchParams(location.hash.slice(1));
+    const b64=params.get('p'); if(!b64) return null;
+    const json=decodeURIComponent(escape(window.atob(b64)));
+    return JSON.parse(json);
+  }catch{ return null; }
 }
 
-/* ========== Admin: update submission (optional) ========== */
-function adminUpdateSubmission_(body){
-  var sap=String(body.sap||'').trim(); var subKey=String(body.subKey||'').trim();
-  if(!sap||!subKey) return {ok:false,error:'missing sap/subKey'};
-  var finalized=(String(body.finalized)==='false'||body.finalized===false)?false:true;
-  var correct=(body.correct===true)?true:(body.correct===false?false:null);
-  var points=(body.points==null?null:Number(body.points));
-  var patch={ Finalized:finalized }; if(body.hasOwnProperty('correct')) patch.Correct=correct; if(body.hasOwnProperty('points')) patch.Points=points;
-  httpPatch_(`${CFG.PATH.SUBMISSIONS}/${sap}/${subKey}`,patch);
-  var m=subKey.match(/^(\d{8}_\d{6})/); var wkKey=m?m[1]:null; if(wkKey){ httpPatch_(`${CFG.PATH.WEEKLY_BY_USER}/${sap}/${wkKey}`,{ Finalized:finalized, result:correct, points:(points==null?0:points) }); }
-  return { ok:true };
-}
-
-/* ========== Forms: Bridge → Awards ========== */
-function readFormTitles_(){
-  const sh=SS().getSheetByName(CFG.SHEET.FORM_TITLES); if(!sh) return {};
-  const v=sh.getDataRange().getDisplayValues(); if(!v.length) return {};
-  const head=v[0].map(s=>String(s||'').trim().toLowerCase());
-  const iNo=head.findIndex(h=>/^(form\s*no|formno|form_no|no)$/.test(h));
-  const iTi=head.findIndex(h=>/^(title|ชื่อ|name)$/.test(h)); if(iNo<0||iTi<0) return {};
-  const map={}; for(let r=1;r<v.length;r++){ const no=String(v[r][iNo]||'').trim(); const ti=String(v[r][iTi]||'').trim(); if(!no) continue; map[String(Number(no))]=ti||('แบบสอบถามชุดที่ '+String(Number(no))); }
-  return map;
-}
-function buildFormAwards(){
-  const shBridge = getOrCreateSheet_('FormsBridge', ['Timestamp','SAP ID','Question No','Source']);
-  const v = shBridge.getDataRange().getDisplayValues();
-  const shAward = getOrCreateSheet_(CFG.SHEET.FORMS, ['FormNo','SAP','BasePoints','BonusPoints','TotalPoints','AwardedAt','Timestamp']);
-
-  // เคลียร์ข้อมูลเก่า (ยกเว้นหัว)
-  const last = Math.max(shAward.getLastRow()-1, 0);
-  if (last > 0) shAward.getRange(2,1,last,7).clearContent();
-
-  if (v.length <= 1) return;
-
-  const head = v[0].map(s => String(s||'').trim().toLowerCase());
-  const iTS  = head.indexOf('timestamp');
-  const iSAP = head.indexOf('sap id') >= 0 ? head.indexOf('sap id') :
-               head.indexOf('sap')    >= 0 ? head.indexOf('sap')    : -1;
-  const iNO  = head.indexOf('question no');
-
-  if (iTS < 0 || iSAP < 0) return;
-
-  // แปลงข้อมูลเป็นแถวแรกของแต่ละ (FormNo,SAP)
-  const rows = [];
-  for (let r=1; r<v.length; r++){
-    const tsRaw = String(v[r][iTS] || '').trim();
-    const sap   = String(v[r][iSAP] || '').trim();
-    if (!tsRaw || !sap) continue;
-
-    const formNo = String(Number((iNO>=0 ? v[r][iNO] : '') || '') || '').trim()
-                || (String(v[r][3] || '').match(/\d+/)||[''])[0] || ''; // กันกรณี Source มีเลขฟอร์ม
-
-    if (!formNo) continue;
-
-    const d = parseDateFlexible_(tsRaw); // อาจตีความได้/ไม่ได้ก็ได้
-    const dateKey = d ? Utilities.formatDate(d, TZ, 'yyyy-MM-dd') : '';
-
-    rows.push({formNo, sap, tsRaw, tsISO: d ? fmtIso_(d) : '', dateKey});
-  }
-
-  // เอาเฉพาะครั้งแรกต่อ (formNo,sap)
-  rows.sort((a,b)=> (a.tsISO||a.tsRaw).localeCompare(b.tsISO||b.tsRaw));
-  const seen = new Set(), firstOnly = [];
-  for (const r of rows){
-    const k = r.formNo+'|'+r.sap;
-    if (seen.has(k)) continue;
-    seen.add(k);
-    firstOnly.push(r);
-  }
-
-  // เขียนตาราง FormAwards
-  const BASE = 3, BONUS = 0;
-  const out = firstOnly.map(r => [ r.formNo, r.sap, BASE, BONUS, BASE+BONUS, r.dateKey, r.tsRaw ]);
-  if (out.length){
-    shAward.getRange(2,1,out.length,7).setValues(out);
-    // ล็อกคอลัมน์ F,G ให้เป็นข้อความ (ป้องกันฟอร์แมตเพี้ยน)
-    shAward.getRange(2,6,Math.max(out.length,1),2).setNumberFormat('@');
-  }
-
-  // Push ขึ้น RTDB (เก็บทั้ง raw และ iso)
-  const TITLE_MAP = readFormTitles_();
-  const all = {}, byUser = {};
-  for (const r of firstOnly){
-    const title = TITLE_MAP[String(r.formNo)] || ('แบบสอบถามชุดที่ '+String(r.formNo));
-    const entry = {
-      sap: r.sap,
-      formNo: String(r.formNo),
-      title,
-      basePoints: BASE,
-      bonusPoints: BONUS,
-      totalPoints: BASE+BONUS,
-      awardedAt: r.tsISO || r.tsRaw,   // ไว้เรียงเวลาได้
-      timestamp: r.tsRaw,              // โชว์ตรงตามฟอร์ม
-      UpdatedAt: new Date().toISOString()
-    };
-    const keyDate = r.dateKey || (r.tsISO ? r.tsISO.slice(0,10) : '');
-    const safeKey = `${r.sap}_${String(r.formNo)}_${keyDate || 'nodate'}`;
-    all[safeKey] = entry;
-    (byUser[r.sap] = byUser[r.sap] || {})[`${String(r.formNo)}_${keyDate || 'nodate'}`] = entry;
-  }
-  httpPut_(CFG.PATH.FORMS_ALL, all);
-  Object.entries(byUser).forEach(([sap,obj]) => httpPut_(`${CFG.PATH.FORMS_BY_USER}/${sap}`, obj));
-}
-
-// ===== FAST PATCH: push user row to RTDB (ทันทีเมื่อแก้ชีต Users) =====
-function pushUserRowToRTDB_(row) {
-  const sh = getSheet_(CFG.SHEET.USERS);
-  const h  = sh.getRange(1,1,1,sh.getLastColumn()).getDisplayValues()[0];
-  const iSAP=h.indexOf('SAP'), iName=h.indexOf('Name'), iSt=h.indexOf('Status'),
-        iEarn=h.indexOf('PointsEarned'), iUsed=h.indexOf('PointsUsed'), iTotal=h.indexOf('PointsTotal');
-  if (iSAP<0) return;
-  const v = sh.getRange(row,1,1,sh.getLastColumn()).getDisplayValues()[0];
-
-  const sap = String(v[iSAP]||'').trim(); if (!sap) return;
-  const obj = {
-    sap,
-    name: String(iName>=0 ? v[iName] : '') || sap,
-    Status: normalizeStatus_(iSt>=0 ? v[iSt] : 'Active'),
-    PointsEarned: Number(iEarn>=0 ? v[iEarn] : 0),
-    PointsUsed:   Number(iUsed>=0 ? v[iUsed] : 0),
-    PointsTotal:  Number(iTotal>=0 ? v[iTotal] : 0),
-    UpdatedAt: new Date().toISOString()
-  };
-  httpPatch_(`${CFG.PATH.USERS_SUMMARY}/${encodeURIComponent(sap)}`, obj);
-}
-
-/* ========== Winners (Top first-correct per activity today) ========== */
-function buildWinnersToday(){
-  const shSub=getOrCreateSheet_(CFG.SHEET.SUBMISSIONS,['Timestamp','SAP','ActID','Answer','Correct','Points','Source','Category','GroupId','Finalized']);
-  const v=shSub.getDataRange().getValues(); if(v.length<=1) return;
-  const h=v[0]; const iTS=h.indexOf('Timestamp'), iSAP=h.indexOf('SAP'), iAct=h.indexOf('ActID'), iOK=h.indexOf('Correct'), iFin=h.indexOf('Finalized');
-  const today=fmtDayKey_(new Date());
-  const usersMap=(function(){ const map={}; readObjects_(CFG.SHEET.USERS).forEach(r=>{ const sap=String(r.SAP||'').trim(); const nm=String(r.Name||'').trim(); if(sap) map[sap]=nm||sap; }); return map; })();
-  const buckets={};
-  for(let r=1;r<v.length;r++){
-    const ts=v[r][iTS]; const d=parseDateFlexible_(ts); if(!d) continue; if(fmtDayKey_(d)!==today) continue;
-    const sap=String(v[r][iSAP]||'').trim(); const act=String(v[r][iAct]||'').trim();
-    const ok=(v[r][iOK]===true || String(v[r][iOK]).toLowerCase()==='true');
-    const fin=(v[r][iFin]===true || String(v[r][iFin]).toLowerCase()==='true');
-    if(!sap||!act||!ok||!fin) continue;
-    (buckets[act]=buckets[act]||[]).push({ ts:d, tsISO:fmtIso_(d), sap, name:(usersMap[sap]||sap) });
-  }
-  Object.keys(buckets).forEach(act=>{
-    const arr=buckets[act].sort((a,b)=>a.ts-b.ts);
-    const seen={}; const out=[];
-    for(let i=0;i<arr.length;i++){ const it=arr[i]; if(seen[it.sap]) continue; seen[it.sap]=1; out.push(it); if(out.length>=CFG.TOP_WINNERS_LIMIT) break; }
-    const pack={}; out.forEach(w=>{ pack[w.sap]={ sap:w.sap, name:w.name, ts:w.tsISO }; });
-    httpPut_(`${CFG.PATH.WINNERS_BY_DATE}/${today}/${encodeURIComponent(act)}`, pack);
-  });
-}
-
-/* ========== Reconcile Submissions (2-pass / per day) ========== */
-function reconcilePointsFromSubmissions(){
-  const shSub=getOrCreateSheet_(CFG.SHEET.SUBMISSIONS,['Timestamp','SAP','ActID','Answer','Correct','Points','Source','Category','GroupId','Finalized']);
-  const v=shSub.getDataRange().getValues(); if(v.length<=1) return;
-  const h=v[0]; const iTS=h.indexOf('Timestamp'), iSAP=h.indexOf('SAP'), iAct=h.indexOf('ActID'), iAns=h.indexOf('Answer'), iOK=h.indexOf('Correct'), iPts=h.indexOf('Points'), iFin=h.indexOf('Finalized');
-  const today=fmtDayKey_(new Date());
-  const shActs=getSheet_(CFG.SHEET.ACTIVITIES), acts=shActs.getDataRange().getDisplayValues(); const ah=acts[0]; const A=n=>ah.indexOf(n);
-  const metaMap={}; for(let r=1;r<acts.length;r++){ const id=String(acts[r][A('ActID')]||'').trim(); if(!id) continue;
-    metaMap[id]={ ActID:id, Answer:String(acts[r][A('Answer')]||'').trim(), BasePoints:Number(acts[r][A('BasePoints')]||0), CorrectBonus:Number(acts[r][A('CorrectBonus')]||0),
-      FirstN:Number(acts[r][A('FirstN')]||0), FirstNBonus:Number(acts[r][A('FirstNBonus')]||0), FirstNRequiresCorrect:String(acts[r][A('FirstNRequiresCorrect')] ?? 'TRUE'),
-      Category:String(acts[r][A('Category')]||''), Title:String(acts[r][A('Title')]||''), Question:String(acts[r][A('Question')]||''), GroupId:String(acts[r][A('GroupId')]||''),
-      OptionA:String(acts[r][A('OptionA')]||''), OptionB:String(acts[r][A('OptionB')]||''), OptionC:String(acts[r][A('OptionC')]||''), OptionD:String(acts[r][A('OptionD')]||'') }; }
-  const byAct={};
-  for(let r=1;r<v.length;r++){
-    const d=parseDateFlexible_(v[r][iTS]); if(!d||fmtDayKey_(d)!==today) continue;
-    const sap=String(v[r][iSAP]||'').trim(); if(!sap) continue;
-    const act=String(v[r][iAct]||'').trim(); if(!act) continue;
-    const ans=String(v[r][iAns]||'').trim(); const meta=metaMap[act]||{}; const hasAnswer=String(meta.Answer||'').trim()!=='';
-    const okNow=hasAnswer?isCorrectAnswer_(meta,ans):null; const basePt=hasAnswer?(Number(meta.BasePoints||0)+(okNow?Number(meta.CorrectBonus||0):0)):0;
-    (byAct[act]=byAct[act]||[]).push({ row:r, ts:d, sap, ans, okNow, basePt, oldOK:v[r][iOK], oldPts:Number(v[r][iPts]||0), meta });
-  }
-  const winnerSet={};
-  Object.entries(byAct).forEach(([actId,arr])=>{
-    const m=arr[0]?arr[0].meta:{}; const N=Number(m.FirstN||0)||0; const bonus=Number(m.FirstNBonus||0)||0; const needCorrect=String(m.FirstNRequiresCorrect||'TRUE').toLowerCase()!=='false';
-    winnerSet[actId]=new Set(); if(!N||!bonus) return;
-    const cand=arr.filter(x=>needCorrect?(x.okNow===true):true).sort((a,b)=>a.ts-b.ts);
-    const seen=new Set(); for(const it of cand){ if(seen.has(it.sap)) continue; seen.add(it.sap); winnerSet[actId].add(it.row); if(winnerSet[actId].size>=N) break; }
-  });
-  for(const [actId,arr] of Object.entries(byAct)){
-    for(const o of arr){
-      const pending=(o.okNow===null);
-      const oldOKStr=String(o.oldOK).toUpperCase(); const oldPts=o.oldPts;
-      if(pending && (oldOKStr==='TRUE'||oldOKStr==='FALSE')) continue;
-      const firstBonus=(!pending && o.okNow===true && winnerSet[actId].has(o.row)) ? Number(o.meta.FirstNBonus||0) : 0;
-      const expected=pending ? oldPts : (o.basePt + firstBonus);
-      let needWrite=false, delta=0;
-      if(pending){ if(oldOKStr!=='PENDING' && oldOKStr!=='TRUE' && oldOKStr!=='FALSE'){ v[o.row][iOK]='PENDING'; needWrite=true; } }
-      else { const newBool=(o.okNow===true); const oldBool=(o.oldOK===true || oldOKStr==='TRUE'); if(oldBool!==newBool){ v[o.row][iOK]=(newBool?'TRUE':'FALSE'); needWrite=true; } }
-      if(oldPts!==expected){ delta=expected-oldPts; v[o.row][iPts]=expected; needWrite=true; }
-      if(!pending){ const oldFin=(v[o.row][iFin]===true || String(v[o.row][iFin]).toLowerCase()==='true'); if(!oldFin){ v[o.row][iFin]=true; needWrite=true; } }
-      if(needWrite){
-        shSub.getRange(o.row+1,1,1,h.length).setValues([v[o.row]]);
-        if(delta) try{ bumpUserPoints_(o.sap, delta); }catch(_){}
-        const iso=Utilities.formatDate(o.ts,TZ,"yyyy-MM-dd'T'HH:mm:ssXXX");
-        const thKey=Utilities.formatDate(o.ts,TZ,'yyyyMMdd_HHmmss');
-        const title=(o.meta.Title||o.meta.Question||actId);
-        const result=pending ? (oldOKStr==='TRUE'?true:(oldOKStr==='FALSE'?false:null)) : (o.okNow===true);
-        httpPatch_(`${CFG.PATH.WEEKLY_BY_USER}/${o.sap}/${thKey}`,{dateISO:iso,actId:actId,title, result, points:expected, Finalized:!pending});
-        httpPatch_(`${CFG.PATH.USER_LAST}/${o.sap}`,{actId:actId,ts:iso,title, correct:result, points:(!pending?expected:(oldOKStr==='TRUE'?oldPts:null)), userAnswer:o.ans});
-      }
-    }
-  }
-  try{ buildWinnersToday(); }catch(_){}
-}
-
-/* ========== JSON out / Web app ========== */
-function jsonOut_(obj){ return ContentService.createTextOutput(JSON.stringify(obj||{})).setMimeType(ContentService.MimeType.JSON); }
-function doOptions(e){ return ContentService.createTextOutput(''); }
-
-function doGet(e){
+/* ===== version ping ===== */
+async function checkVersion(){
+  const el = $('#ver');
   try{
-    var p   = (e && e.parameter) || {};
-    var act = String(p.action || p.act || p.a || '').trim().toLowerCase();
-
-    // --- ไม่มี action = ping (รองรับ JSONP callback) ---
-    if (!act){
-      var payload = JSON.stringify({ ok:true, ping:'OK', time: fmtIso_(new Date()) });
-      var cb = p.callback || p.cb;
-      return ContentService.createTextOutput(cb ? (cb + '(' + payload + ');') : payload)
-             .setMimeType(ContentService.MimeType.JAVASCRIPT);
-    }
-
-    // --- จัดการ action ---
-    switch (act){
-
-      case 'version':
-        return _jsonpOut_(e, { ok:true, version:'admin-redeem-1', time:fmtIso_(new Date()) });
-
-      // ✓ ตรวจสิทธิ์แอดมินจากชีต getAdmins (ใช้โดยหน้า Admin ตอนพิมพ์ SAP)
-      case 'verifyadmin':
-        return verifyAdmin_(e);
-
-      // ✓ ยืนยันการแลก: เขียน Redemptions + หักแต้ม + ตัดสต็อก
-      case 'confirmredeem':
-        return _confirmRedeem_(e, {
-          sap:        p.sap,
-          rewardName: p.rewardName || p.reward,
-          points:     p.points || p.pts,
-          admin:      p.admin || p.adminSAP,
-          ts:         p.ts
-        });
-
-      // ✓ หน้าผู้ใช้เรียกเช็ค “ตอบแล้ววันนี้หรือยัง”
-      case 'answered': {
-        var sap   = String(p.sap||'').trim();
-        var actId = String(p.actId||'').trim();
-        if (!sap || !actId) return _jsonpOut_(e, { ok:false, error:'missing_sap_actId' });
-        return _jsonpOut_(e, { ok:true, answered: hasSubmittedToday_(sap, actId) });
-      }
-
-      // ✓ เช็คสถานะผู้ใช้ (Active / Non-active)
-      case 'userstatus': {
-        var sap2 = String(p.sap||'').trim();
-        if (!sap2) return _jsonpOut_(e, { ok:false, error:'missing_sap' });
-        try{
-          var sh = getSheet_(CFG.SHEET.USERS);
-          var v  = sh.getDataRange().getDisplayValues();
-          if (v.length <= 1) return _jsonpOut_(e, { ok:false, error:'empty_users' });
-          var h=v[0], iSAP=h.indexOf('SAP'), iNM=h.indexOf('Name'), iST=h.indexOf('Status');
-          if (iSAP<0||iST<0) return _jsonpOut_(e, { ok:false, error:'bad_users_header' });
-          var name='', status='Non-active';
-          for (var r=1;r<v.length;r++){
-            if (String(v[r][iSAP]).trim()===sap2){
-              name  = String(v[r][iNM]||'').trim() || sap2;
-              status= normalizeStatus_(v[r][iST]);
-              break;
-            }
-          }
-          return _jsonpOut_(e, { ok:true, sap:sap2, name, status, active:(status==='Active'), ts:new Date().toISOString() });
-        }catch(err){
-          return _jsonpOut_(e, { ok:false, error:String(err) });
-        }
-      }
-
-      // (ออปชัน) ดึงรายการแอดมินทั้งหมดจากชีต getAdmins/Admins
-      case 'getadmins': {
-        var sh = SS().getSheetByName('getAdmins') || SS().getSheetByName('Admins');
-        var out=[];
-        if (sh){
-          var v=sh.getDataRange().getDisplayValues();
-          var head=v[0]||[], iSAP=head.indexOf('SAP'), iName=head.indexOf('Name');
-          for (var r=1;r<v.length;r++){
-            if (String(v[r][iName]||'').trim()){
-              out.push({ sap:String(v[r][iSAP]||'').trim(), name:String(v[r][iName]||'').trim() });
-            }
-          }
-        }
-        return _jsonpOut_(e, { ok:true, items:out });
-      }
-
-      default:
-        return _jsonpOut_(e, { ok:false, error:'unknown_action', echo:p });
-    }
-
-  } catch(err){
-    return _jsonpOut_(e, { ok:false, error:String(err) });
-  }
+    const r = await api({action:'version'});
+    el.textContent = (r && r.ok) ? 'เชื่อมต่อฐานข้อมูล' : 'เชื่อมต่อ Apps Script ไม่สำเร็จ';
+  }catch{ el.textContent = 'เชื่อมต่อ Apps Script ไม่สำเร็จ'; }
 }
 
-function _jsonpOut_(e,obj){
-  var cb=(e&&e.parameter&&(e.parameter.callback||e.parameter.cb))||'';
-  var txt=JSON.stringify(obj||{});
-  var payload=cb?(cb+'('+txt+');'):txt;
-  return ContentService.createTextOutput(payload).setMimeType(ContentService.MimeType.JAVASCRIPT);
-}
-
-/* doPost: queue/direct/admin */
-function processQueueItem_(key, item){
-  if(!item) return { ok:false, error:'empty_item' };
-
-  var sap    = String(item.sap||'').trim();
-  var actId  = String(item.actId||'').trim();
-  var answer = String(item.answer||'').trim();
-  var tsISO  = String(item.timestamp || fmtIso_(new Date()));
-  var client = String(item.client||'web-anesa+');
-
-  if(!sap || !actId) return { ok:false, error:'missing sap/actId' };
-  if(getUserStatus_(sap)!=='Active') return { ok:false, error:'USER_NON_ACTIVE' };
-  if(hasSubmittedToday_(sap,actId)) return {ok:false,error:'already_answered_today', errorCode:'ALREADY_ANSWERED'};
-
-  var meta      = readActivityMetaById_(actId) || {};
-  var title     = meta.Title || meta.Question || actId;
-  var inputType = String(meta.InputType||'choice').toLowerCase();
-  var hasAnswer = String(meta.Answer||'').trim() !== '';
-
-  var correct   = null;
-  var points    = 0;
-  var finalized = false;
-
-  if (['choice','radio','select'].includes(inputType)) {
-    if (hasAnswer) {
-      correct   = isCorrectAnswer_(meta, answer) ? true : false;
-      points    = correct ? (Number(meta.BasePoints||0) + Number(meta.CorrectBonus||0)) : 0;
-      if (correct) points += calcFirstNBonus_(meta, actId, true);
-      finalized = true;
-    }
-  } else if (['num','num2','number','numeric','text','lotto'].includes(inputType)) {
-    if (hasAnswer) {
-      correct   = isCorrectAnswer_(meta, answer) ? true : false;
-      points    = correct ? (Number(meta.BasePoints||0) + Number(meta.CorrectBonus||0)) : 0;
-      if (correct) points += calcFirstNBonus_(meta, actId, true);
-      finalized = true;
-    } else {
-      correct   = null;
-      points    = 0;
-      finalized = false;
-    }
-  }
-
-  markAnsweredToday_(sap, actId);
-
-  appendSubmissionRowForceText_([
-    tsISO, sap, actId, answer,
-    (correct===true ? 'TRUE' : (correct===false ? 'FALSE' : 'PENDING')),
-    points,
-    client,
-    meta.Category||'', meta.GroupId||'',
-    (finalized ? 'TRUE' : 'FALSE')
-  ]);
-
-  try {
-  const dayKey = Utilities.formatDate(new Date(tsISO), TZ, 'yyyy-MM-dd');
-  httpPatch_(`public/answeredToday/${dayKey}/${encodeURIComponent(actId)}/${sap}`, true);
-  httpPatch_(`public/answeredByAct/${encodeURIComponent(actId)}/${sap}`, tsISO);
-} catch(e){}
-
-  // RTDB mirrors
-  var thKey = Utilities.formatDate(new Date(tsISO), TZ, 'yyyyMMdd_HHmmss');
-  httpPatch_(`${CFG.PATH.USER_LAST}/${sap}`, {
-    actId, ts: tsISO, title,
-    correct:(correct===true?true:(correct===false?false:null)),
-    points:(finalized?points:null),
-    userAnswer: answer
-  });
-  httpPatch_(`${CFG.PATH.WEEKLY_BY_USER}/${sap}/${thKey}`, {
-    dateISO: tsISO, actId, title,
-    result:(correct===true?true:(correct===false?false:null)),
-    points:(finalized?points:0),
-    Finalized: finalized
-  });
-
-  // บวกแต้ม + winners (ถ้าสำเร็จ)
-  if(finalized && correct===true && points>0){
-    bumpUserPoints_(sap, points);
-    try { buildWinnersToday(); } catch(_) {}
-  }
-
-  // ↩️ คืนค่าทุกกรณี (ป้องกัน “end of input” และ flow ค้าง)
-  return {
-    ok: true,
-    correct: (correct===true ? 'TRUE' : (correct===false ? 'FALSE' : 'PENDING')),
-    points: (correct===true ? points : 0)
-  };
-}
-
-function doPost(e){
+/* ===== โหลดรายชื่อแอดมิน (dropdown) ===== */
+async function loadAdmins(){
+  const sel = $('#adminSelect');
   try{
-    var body={}; try{ body=JSON.parse(e.postData && e.postData.contents || '{}'); }catch(_){}
-    var action=String(body.action||'').toLowerCase();
-    if(action==='queue:process'){ var key=String(body.key||('ans_'+Date.now())); var item=body.item||null; if(!item && key){ try{ var url=rtdbUrl_(`${CFG.PATH.ANSWERS_QUEUE}/${encodeURIComponent(key)}`); var q=_authQuery(); var headers={}; if(!q){ var tok=getAccessToken_(); if(tok) headers.Authorization='Bearer '+tok; } var res=UrlFetchApp.fetch(url+q,{method:'get',headers:headers}); item=JSON.parse(res.getContentText()); }catch(_){}} return jsonOut_(processQueueItem_(key,item)); }
-    if(action==='admin:updatesubmission') return jsonOut_(adminUpdateSubmission_(body));
-    if(action==='admin:rebuildwinners'){ buildWinnersToday(); return jsonOut_({ok:true}); }
-    if(action===''||action==='submitanswer'){ fixSubmissionsSchema_(); return jsonOut_(handleSubmitAnswer_(body)); }
-    return jsonOut_({ok:false,error:'unknown_action'});
-  }catch(err){
-    try{ var sh=getOrCreateSheet_('WebErrors',['Time','Error','Raw']); sh.appendRow([new Date(), String(err), e && e.postData && e.postData.contents || '']); }catch(_){}
-    return jsonOut_({ok:false,error:String(err)});
-  }
-}
-
-/* อ่าน meta กิจกรรม */
-function readActivityMetaById_(actId){
-  var sh=getSheet_(CFG.SHEET.ACTIVITIES); var v=sh.getDataRange().getDisplayValues(); if(v.length<=1) return null;
-  var h=v[0]; var idx=c=>h.indexOf(c);
-  var iAct=idx('ActID'), iAns=idx('Answer'), iBase=idx('BasePoints'), iBon=idx('CorrectBonus'), iCat=idx('Category'), iG=idx('GroupId'),
-      iFirstN=idx('FirstN'), iFirstB=idx('FirstNBonus'), iReq=idx('FirstNRequiresCorrect'), iTi=idx('Title'), iQ=idx('Question'),
-      iWS=idx('WindowStart'), iWE=idx('WindowEnd'), iInput=idx('InputType'), iOptA=idx('OptionA'), iOptB=idx('OptionB'), iOptC=idx('OptionC'), iOptD=idx('OptionD');
-  for(var r=1;r<v.length;r++){
-    if(String(v[r][iAct])===String(actId)){
-      return { ActID:actId, OptionA:String(iOptA>=0?v[r][iOptA]:''), OptionB:String(iOptB>=0?v[r][iOptB]:''), OptionC:String(iOptC>=0?v[r][iOptC]:''), OptionD:String(iOptD>=0?v[r][iOptD]:''), InputType:String(iInput>=0?v[r][iInput]:''), Answer:v[r][iAns]||'', BasePoints:Number(v[r][iBase]||0), CorrectBonus:Number(v[r][iBon]||0), Category:v[r][iCat]||'', GroupId:v[r][iG]||'', FirstN:Number(v[r][iFirstN]||0), FirstNBonus:Number(v[r][iFirstB]||0), FirstNRequiresCorrect:String((v[r][iReq]||'TRUE')).toUpperCase()!=='FALSE', Title:v[r][iTi]||'', Question:v[r][iQ]||'', WindowStart:v[r][iWS]||'', WindowEnd:v[r][iWE]||'' };
+    const r = await api({action:'getadmins'});
+    const items = (r && r.ok && Array.isArray(r.items)) ? r.items : [];
+    if (!items.length){
+      sel.innerHTML = '<option value="">ไม่พบรายชื่อแอดมิน</option>';
+      return;
     }
-  } return null;
-}
-
-/* ===== Rejudge helpers (เมื่อแก้เฉลย) ===== */
-function computeFirstNWinners_(rows, meta){
-  var N=Number(meta.FirstN||0); if(!N||N<=0) return new Set();
-  var tmp=rows.filter(o=>isCorrectAnswer_(meta,o.userAnswer||o.answerOld)).map((o,ix)=>({ix,ts:parseDateFlexible_(o.tsISO)||new Date(o.tsISO)})).sort((a,b)=>a.ts-b.ts);
-  var winners=new Set(); for(var i=0;i<tmp.length && i<N;i++){ winners.add(tmp[i].ix); } return winners;
-}
-function bumpUserPointsDelta_(sap,delta){ bumpUserPoints_(sap,delta); }
-function rejudgeSubmissionsForAct_(actId){
-  var meta=readActivityMetaById_(actId); if(!meta) return;
-  var sh=getOrCreateSheet_(CFG.SHEET.SUBMISSIONS,['Timestamp','SAP','ActID','Answer','Correct','Points','Source','Category','GroupId','Finalized']);
-  var v=sh.getDataRange().getValues(); if(v.length<=1) return; var h=v[0]; var idx=c=>h.indexOf(c);
-  var iTS=idx('Timestamp'), iSAP=idx('SAP'), iAct=idx('ActID'), iAns=idx('Answer'), iOK=idx('Correct'), iPts=idx('Points'), iFin=idx('Finalized');
-  var rows=[]; for(var r=1;r<v.length;r++){ if(String(v[r][iAct])!==String(actId)) continue; rows.push({ row:r+1, tsISO:String(v[r][iTS]||''), sap:String(v[r][iSAP]||'').trim(), userAnswer:String(v[r][iAns]||''), correctOld:v[r][iOK], pointsOld:Number(v[r][iPts]||0), finalizedOld:(v[r][iFin]===true||String(v[r][iFin]).toLowerCase()==='true') }); }
-  if(!rows.length) return;
-  var winnersIx=computeFirstNWinners_(rows,meta);
-  rows.forEach(function(o,ix){
-    var was={ correct:(o.correctOld===true || String(o.correctOld).toUpperCase()==='TRUE') ? true : (o.correctOld===false || String(o.correctOld).toUpperCase()==='FALSE') ? false : null, points:Number(o.pointsOld||0) };
-    var isCorrect=isCorrectAnswer_(meta,o.userAnswer);
-    var base=Number(meta.BasePoints||0), bonusCorrect=isCorrect?Number(meta.CorrectBonus||0):0, bonusFirstN=(winnersIx.has(ix) && (!meta.FirstNRequiresCorrect || isCorrect))?Number(meta.FirstNBonus||0):0;
-    var newPoints=isCorrect ? base+bonusCorrect+bonusFirstN : 0, newCorrect=isCorrect?true:false;
-    var wasPending=(was.correct===null || String(o.correctOld).toUpperCase()==='PENDING' || String(o.correctOld)==='');
-    var needUpdate=wasPending || (was.correct!==newCorrect) || (was.points!==newPoints);
-    if(needUpdate){
-      sh.getRange(o.row,iOK+1).setValue(newCorrect);
-      sh.getRange(o.row,iPts+1).setValue(newPoints);
-      sh.getRange(o.row,iFin+1).setValue(true);
-      if(o.sap){ var delta=newPoints-(was.points||0); if(delta) bumpUserPoints_(o.sap,delta); }
-      try{
-        var wkKey=Utilities.formatDate(parseDateFlexible_(o.tsISO)||new Date(o.tsISO),TZ,'yyyyMMdd_HHmmss'); var title=meta.Title||meta.Question||actId;
-        httpPatch_(`${CFG.PATH.WEEKLY_BY_USER}/${o.sap}/${wkKey}`,{dateISO:o.tsISO,actId:actId,title:title,result:newCorrect,points:newPoints,Finalized:true});
-        httpPatch_(`${CFG.PATH.USER_LAST}/${o.sap}`,{actId:actId,ts:o.tsISO,title:title,correct:newCorrect,points:newPoints,userAnswer:o.userAnswer});
-      }catch(_){}
-    }
-  });
-  try{ buildWinnersToday(); }catch(_){}
-}
-
-/* ======= FormsBridge builder ======= */
-function buildFormsBridge(){
-  const ss = SS();
-  const shBridge = getOrCreateSheet_('FormsBridge', ['Timestamp','SAP ID','Question No','Source']);
-
-  // ล้างข้อมูลเก่า (ยกเว้นหัว)
-  const last = Math.max(shBridge.getLastRow()-1, 0);
-  if (last > 0) shBridge.getRange(2,1,last,4).clearContent();
-
-  // หาชีตฟอร์ม
-  const formSheets = ss.getSheets().map(s=>s.getName())
-    .filter(n => /^(form|แบบฟอร์ม)[_\s-]?\d+$/i.test(n))
-    .sort((a,b) => (+(a.match(/\d+/)||[0])[0]) - (+(b.match(/\d+/)||[0])[0]));
-
-  const out = [];
-
-  formSheets.forEach(name => {
-    const sh = ss.getSheetByName(name); if (!sh) return;
-    const v  = sh.getDataRange().getDisplayValues(); if (v.length <= 1) return;
-
-    const head = v[0].map(s => String(s||'').trim().toLowerCase());
-    const iTS  = head.indexOf('timestamp');
-    const iSAP = (() => { for (let i=0;i<head.length;i++) if (/^(sap(\s*id)?|sap id|sap)$/.test(head[i])) return i; return -1; })();
-    const iNO  = head.indexOf('question no');
-
-    if (iTS < 0 || iSAP < 0) return;
-
-    const fallbackNo = (name.match(/\d+/)||[''])[0];
-
-    for (let r=1; r<v.length; r++){
-      const tsRaw = String(v[r][iTS] || '').trim();     // ← ใช้ "ข้อความตามฟอร์ม"
-      if (!tsRaw) continue;
-
-      const sap   = String(v[r][iSAP] || '').trim();
-      if (!sap) continue;
-
-      const no    = (iNO >= 0 ? String(v[r][iNO]||'').trim() : '') || fallbackNo;
-
-      // เขียนค่าตามที่ฟอร์มส่งมา (ไม่แปลง ISO)
-      out.push([ tsRaw, sap, String(Number(no)||no), name ]);
-    }
-  });
-
-  if (out.length){
-    shBridge.getRange(2,1,out.length,4).setValues(out);
-    // ล็อกคอลัมน์ Timestamp ให้เป็นข้อความล้วน
-    shBridge.getRange(2,1,Math.max(out.length,1),1).setNumberFormat('@');
+    sel.innerHTML = '<option value="">— เลือกแอดมิน —</option>' +
+      items.map(x => `<option value="${(x.sap||'').trim()}">${(x.name||'').trim()} (${(x.sap||'').trim()})</option>`).join('');
+  }catch{
+    sel.innerHTML = '<option value="">โหลดรายชื่อแอดมินไม่สำเร็จ</option>';
   }
 }
 
-/* ========== MENU / TRIGGERS ========== */
-function onOpen(){
-  SpreadsheetApp.getUi()
-    .createMenu('ANESA')
-    .addItem('🚀 Sync All Now','syncAllNow')
-    .addItem('📥 Process Answers Queue','processAnswersQueue')
-    .addSeparator()
-    .addItem('🧱 Build Forms Bridge','buildFormsBridge')
-    .addItem('🏅 Build Form Awards + Push','buildFormAwards')
-    .addItem('🥇 Build Winners (Today)','buildWinnersToday')
-    .addSeparator()
-    .addItem('🔁 Refresh Snapshots (Users/Rewards/Activities)','refreshSnapshotsSafe_')
-    .addItem('🛠 Install Triggers','setupTriggersOnce')
-    .addToUi();
-}
-function syncAllNow(){ refreshSnapshotsSafe_(); buildFormsBridge(); buildFormAwards(); buildWinnersToday(); }
-function refreshSnapshotsSafe_(){ try{ syncUsers(); syncRewards(); syncActivities(); }catch(e){ Logger.log(e); } }
-function setupTriggersOnce(){
-  const id=SpreadsheetApp.getActive().getId();
-  ScriptApp.getProjectTriggers().forEach(t=>ScriptApp.deleteTrigger(t));
-  ScriptApp.newTrigger('onAnyEdit').forSpreadsheet(id).onEdit().create();
-  ScriptApp.newTrigger('onAnyChange').forSpreadsheet(id).onChange().create();
-  ScriptApp.newTrigger('cronForms').timeBased().everyMinutes(1).create();
-  ScriptApp.newTrigger('cronSync').timeBased().everyMinutes(5).create();
-  ScriptApp.newTrigger('cronWinners').timeBased().everyMinutes(1).create();
-  ScriptApp.newTrigger('cronRejudgePending').timeBased().everyMinutes(1).create();
-  SpreadsheetApp.getActive().toast('Triggers installed ✓','ANESA',5);
-}
+/* ===== กดยืนยันการแลก ===== */
+$('#btnConfirm').addEventListener('click', async ()=>{
+  const statusEl = $('#status');
+  statusEl.textContent = 'กำลังตรวจสอบ...';
 
-// ===== FAST PATCH: push user row to RTDB (ทันทีเมื่อแก้ชีต Users) =====
-function onAnyEdit(e){
-  try{ onEdit_RejudgeWhenAnswerChanged_(e); }catch(_){}
-  const sh   = e && e.range ? e.range.getSheet() : SpreadsheetApp.getActive().getActiveSheet();
-  const name = sh ? sh.getName() : '';
-
- // ✅ เมื่อแก้ Users ให้ push เฉพาะแถวที่แก้ไป RTDB ทันที (ไม่ต้องรอ sync รอบถัดไป)
-if (name === CFG.SHEET.USERS && e && e.range) {
-  const start = e.range.getRow();
-  const nrows = e.range.getNumRows();
-  for (let r = start; r < start + nrows; r++) {
-    if (r > 1) { // ข้ามหัวตาราง
-      try { pushUserRowToRTDB_(r); } catch(_) {}
-    }
-  }
-}
-
-
-  // ของเดิมที่คุณมี (คงไว้)
-  if(/^(form|แบบฟอร์ม)[_\s]?\d+$/i.test(name) || /^FormsBridge$/i.test(name) || /^FORM_TITLES$/i.test(name)){
-    buildFormsBridge(); buildFormAwards();
-  }
-  if([CFG.SHEET.USERS, CFG.SHEET.REWARDS, CFG.SHEET.ACTIVITIES, CFG.SHEET.SUBMISSIONS].includes(name)){
-    refreshSnapshotsSafe_();
-    if(name===CFG.SHEET.ACTIVITIES){ reconcilePointsFromSubmissions(); }
-    if(name===CFG.SHEET.SUBMISSIONS){ buildWinnersToday(); }
-  }
-}
-
-function onAnyChange(e){ buildFormsBridge(); buildFormAwards(); refreshSnapshotsSafe_(); buildWinnersToday(); }
-function cronForms(){ buildFormsBridge(); buildFormAwards(); }
-function cronWinners(){ buildWinnersToday(); }
-function cronSync(){ refreshSnapshotsSafe_(); reconcilePointsFromSubmissions(); }
-function processAnswersQueue(){ SpreadsheetApp.getActive().toast('Queue processor stub (no-op)','ANESA',3); }
-
-/* Misc */
-function toast_(msg){ try{ SpreadsheetApp.getActive().toast(msg,'ANESA',4); }catch(e){} }
-function ensureSubmissionsTextFormat_(){ return fixSubmissionsSchema_(); }
-function runFixNow(){ fixSubmissionsSchema_(); SpreadsheetApp.getActive().toast('Formatted Submissions ✓','ANESA',4); }
-
-/* ===== confirmredeem helper (ไม่กระทบโครงสร้างเดิม) ===== */
-function _confirmRedeem_(e, p){
-  var sap = String(p.sap||'').trim();
-  var reward = String(p.rewardName||p.reward||'').trim();
-
-  // รองรับทั้ง adminSAP และ admin (ของเดิม) แต่บังคับตรวจสิทธิ์ด้วย Admins sheet
-  var adminSAP = String(p.adminSAP || p.admin || '').trim();
-
-  // points: ถ้าฝั่งหน้าไม่ส่งมาถูกต้อง จะยึดตาม PointsRequired อยู่ดี
-  var pts = Number(p.points||p.pts||0)||0;
-  var ts  = String(p.ts||'') || fmtIso_(new Date());
-
-  if(!sap || !reward || !adminSAP){
-    return _jsonpOut_(e, { ok:false, error:'missing_params', echo:p });
+  const adminSAP = ($('#adminSelect').value||'').trim();
+  const adminText = $('#adminSelect').selectedOptions[0]?.textContent || '';
+  if(!adminSAP){
+    statusEl.textContent = 'กรุณาเลือกแอดมิน';
+    return;
   }
 
-/* ===== verifyAdmin helper (อ่านชีท getAdmins) ===== */
-function verifyAdmin_(e, p){
+  const payload = decodePayload();
+  if(!payload){ statusEl.textContent = 'ไม่พบข้อมูลจาก QR'; return; }
+
+  // ยิงยืนยันการแลก
+  statusEl.textContent = 'กำลังบันทึกการแลก...';
   try{
-    var sap = String((p && p.sap) || '').trim();
-    if(!sap) return _jsonpOut_(e,{ ok:false, error:'missing_sap' });
-
-    // ชื่อชีทและหัวคอลัมน์ต้องตรงตามนี้
-    var sh = SS().getSheetByName('getAdmins');
-    if(!sh) return _jsonpOut_(e,{ ok:false, error:'sheet_not_found' });
-
-    var v = sh.getDataRange().getDisplayValues();
-    if(v.length < 2) return _jsonpOut_(e,{ ok:false, error:'empty_sheet' });
-
-    var head = v[0];
-    var iSAP  = head.indexOf('SAP');
-    var iName = head.indexOf('Name');
-    if(iSAP < 0 || iName < 0)
-      return _jsonpOut_(e,{ ok:false, error:'bad_headers' });
-
-    for(var r=1; r<v.length; r++){
-      if(String(v[r][iSAP]).trim() === sap){
-        var name = String(v[r][iName] || '').trim();
-        return _jsonpOut_(e,{ ok:true, adminName: name || sap });
-      }
+    const r = await api({
+      action:'confirmRedeem',
+      sap: payload.sap,
+      reward: payload.reward,
+      points: payload.pts,
+      adminSAP: adminSAP
+    });
+    if(r && r.ok){
+      statusEl.textContent = `แลกสำเร็จ โดย ${adminText}`;
+    }else{
+      statusEl.textContent = r && r.error ? r.error : 'แลกไม่สำเร็จ';
     }
-    return _jsonpOut_(e,{ ok:false, error:'not_admin' });
-  }catch(err){
-    return _jsonpOut_(e,{ ok:false, error:String(err) });
+  }catch{
+    statusEl.textContent = 'เกิดข้อผิดพลาดในการเชื่อมต่อ';
   }
-}
+});
 
-  // ===== ตรวจสิทธิ์แอดมินจากชีต Admins =====
-  var adminName = getAdminNameBySAP_(adminSAP);   // << ต้องมี helper นี้ (ดูด้านล่าง)
-  if(!adminName){
-    return _jsonpOut_(e, { ok:false, error:'admin_not_allowed', adminSAP: adminSAP });
-  }
+/* ===== main ===== */
+(async function init(){
+  const data = decodePayload();
+  if(!data){ $('#status').textContent = 'ไม่พบข้อมูลจาก QR'; return; }
+  $('#sap').textContent    = data.sap || '—';
+  $('#reward').textContent = data.reward || '—';
+  $('#points').textContent = fmt(data.pts || 0);
 
-  // ===== อ่าน Users =====
-  var shU = getSheet_('Users');
-  var uGrid = shU.getDataRange().getDisplayValues();
-  if(uGrid.length <= 1) return _jsonpOut_(e,{ok:false,error:'users_empty'});
-
-  var uHead = uGrid[0];
-  var iSAP   = uHead.indexOf('SAP');
-  var iName  = uHead.indexOf('Name');
-  var iStat  = uHead.indexOf('Status');
-  var iEarn  = uHead.indexOf('PointsEarned');
-  var iUsed  = uHead.indexOf('PointsUsed');
-  var iTotal = uHead.indexOf('PointsTotal');
-  if(iSAP<0 || iName<0 || iEarn<0 || iUsed<0 || iTotal<0){
-    return _jsonpOut_(e,{ok:false,error:'users_header_missing'});
-  }
-
-  var uRow=-1, uName='', uStatus='Active', uEarn=0, uUsed=0, uTotal=0;
-  for(var r=1;r<uGrid.length;r++){
-    if(String(uGrid[r][iSAP]).trim() === sap){
-      uRow   = r;
-      uName  = String(uGrid[r][iName]||'').trim() || sap;
-      uStatus= String(uGrid[r][iStat]||'Active');
-      uEarn  = Number(uGrid[r][iEarn]||0);
-      uUsed  = Number(uGrid[r][iUsed]||0);
-      uTotal = Number(uGrid[r][iTotal]||0);
-      break;
-    }
-  }
-  if(uRow<0) return _jsonpOut_(e,{ok:false,error:'user_not_found'});
-
-  // non-active guard
-  var s = String(uStatus||'').trim().toLowerCase();
-  var isActive = (s==='' || /^(active|enabled?|true|1|เปิด|ใช้งาน|on|yes)$/.test(s));
-  if(!isActive){
-    return _jsonpOut_(e,{ok:false,error:'USER_NON_ACTIVE'});
-  }
-
-  // ===== อ่าน Rewards =====
-  var shR = getSheet_('Rewards');
-  var rGrid = shR.getDataRange().getDisplayValues();
-  if(rGrid.length <= 1) return _jsonpOut_(e,{ok:false,error:'rewards_empty'});
-
-  var rHead = rGrid[0];
-  var iRN   = (rHead.indexOf('RewardName')>=0)? rHead.indexOf('RewardName') : rHead.indexOf('Name');
-  var iReq  = (rHead.indexOf('PointsRequired')>=0)? rHead.indexOf('PointsRequired') : rHead.indexOf('Points');
-  var iStock= (rHead.indexOf('StockRemaining')>=0)? rHead.indexOf('StockRemaining') : rHead.indexOf('Stock');
-  var iAct  = rHead.indexOf('Active');
-
-  if(iRN<0 || iReq<0 || iStock<0){
-    return _jsonpOut_(e,{ok:false,error:'rewards_header_missing'});
-  }
-
-  var rRow=-1, rNeed=0, rStock=0, rAct='TRUE';
-  for(var rr=1; rr<rGrid.length; rr++){
-    if(String(rGrid[rr][iRN]).trim() === reward){
-      rRow   = rr;
-      rNeed  = Number(rGrid[rr][iReq]||0);
-      rStock = Number(rGrid[rr][iStock]||0);
-      rAct   = String((iAct>=0 ? rGrid[rr][iAct] : 'TRUE')||'TRUE');
-      break;
-    }
-  }
-  if(rRow<0) return _jsonpOut_(e,{ok:false,error:'reward_not_found'});
-  if(String(rAct).toLowerCase()==='false') return _jsonpOut_(e,{ok:false,error:'reward_inactive'});
-  if(rStock<=0) return _jsonpOut_(e,{ok:false,error:'out_of_stock'});
-
-  // ยึดแต้มตามที่กำหนดในรางวัล
-  if(pts !== rNeed) pts = rNeed;
-  if(pts <= 0) return _jsonpOut_(e,{ok:false,error:'invalid_points'});
-  if(uTotal < pts) return _jsonpOut_(e,{ok:false,error:'not_enough_points', total:uTotal, need:pts});
-
-  // ===== หักสต็อก / หักแต้ม =====
-  shR.getRange(rRow+1, iStock+1).setValue(rStock-1);
-
-  shU.getRange(uRow+1, iUsed+1).setValue(uUsed + pts);
-  shU.getRange(uRow+1, iTotal+1).setValue(uEarn - (uUsed + pts));
-
-  // ===== Log: Redemptions (หัวข้อใหม่ตามที่ต้องการ) =====
-  var shLog = SS().getSheetByName('Redemptions') || SS().insertSheet('Redemptions');
-  if(shLog.getLastRow() === 0){
-    shLog.getRange(1,1,1,8).setValues([[
-      'Timestamp','SAP','Name','RewardName','PointsUsed','AdminSAP','AdminName','Status'
-    ]]);
-  }
-  shLog.appendRow([ts, sap, uName, reward, pts, adminSAP, adminName, 'CONFIRMED']);
-
-  // ===== แจ้ง RTDB (ให้หน้า User เห็นทันที แต่ไม่เปลี่ยนสคีมาเดิม) =====
+  // ชื่อผู้ใช้จาก RTDB
   try{
-    httpPatch_(
-      'public/redeemAck/'+encodeURIComponent(sap),
-      { sap, rewardName:reward, points:pts, admin:adminSAP, adminName:adminName, timestamp:ts, UpdatedAt:new Date().toISOString() }
-    );
-  }catch(_){}
-
-  // คงพฤติกรรมเดิม: sync mirrors
-  try{ syncUsers(); syncRewards(); }catch(_){}
-
-  var totalAfter = uEarn - (uUsed + pts);
-  var stockAfter = (rStock - 1);
-  return _jsonpOut_(e,{ ok:true, totalAfter:totalAfter, stockAfter:stockAfter, adminName:adminName, userName:uName });
-}
-
-/** ---------- WEEKLY MIRROR: rebuild from Submissions ---------- **/
-function _boolFromCell_(v){
-  const s = String(v).trim().toUpperCase();
-  if (v === true || s === 'TRUE')  return true;
-  if (v === false || s === 'FALSE') return false;
-  return null; // PENDING/ว่าง
-}
-
-function _upsertWeekly_(sap, ts, actId, title, resultBool, points, finalized){
-  const thKey = Utilities.formatDate(ts, TZ, 'yyyyMMdd_HHmmss');
-  const iso   = Utilities.formatDate(ts, TZ, "yyyy-MM-dd'T'HH:mm:ssXXX");
-  httpPatch_(`${CFG.PATH.WEEKLY_BY_USER}/${sap}/${thKey}`, {
-    dateISO: iso,
-    actId, title,
-    result: resultBool,
-    points: Number(points||0),
-    Finalized: !!finalized
-  });
-  httpPatch_(`${CFG.PATH.USER_LAST}/${sap}`, {
-    actId, ts: iso, title,
-    correct: resultBool,
-    points: finalized ? Number(points||0) : null
-  });
-}
-
-/**
- * อ่าน Submissions แล้วย้อนเขียน /public/weeklyByUser/<SAP>/<yyyyMMdd_HHmmss>
- * โดยไม่แก้คะแนนใน Users (mirror อย่างเดียว)
- * @param {number} daysBack จำนวนวันย้อนหลัง (เช่น 30)
- */
-function rebuildWeeklyFromSubmissions(daysBack){
-  daysBack = Number(daysBack||7);
-  const sh = getOrCreateSheet_(CFG.SHEET.SUBMISSIONS,
-    ['Timestamp','SAP','ActID','Answer','Correct','Points','Source','Category','GroupId','Finalized']);
-  const v = sh.getDataRange().getValues();
-  if (v.length <= 1) return;
-
-  const h=v[0];
-  const iTS=h.indexOf('Timestamp'),
-        iSAP=h.indexOf('SAP'),
-        iAct=h.indexOf('ActID'),
-        iAns=h.indexOf('Answer'),
-        iOK=h.indexOf('Correct'),
-        iPts=h.indexOf('Points'),
-        iFin=h.indexOf('Finalized');
-
-  // meta ไว้ดึง Title/Question
-  const acts = getSheet_(CFG.SHEET.ACTIVITIES).getDataRange().getDisplayValues();
-  const ah=acts[0]; const A=n=>ah.indexOf(n);
-  const metaMap={};
-  for (let r=1;r<acts.length;r++){
-    const id = String(acts[r][A('ActID')]||'').trim(); if(!id) continue;
-    metaMap[id] = {
-      Title: String(acts[r][A('Title')]||''),
-      Question: String(acts[r][A('Question')]||'')
-    };
+    const snap = await get(ref(db, 'public/usersSummary/'+(data.sap||'')));
+    const v = snap.exists() ? snap.val() : {};
+    $('#name').textContent = v.name || '(ไม่พบชื่อในระบบ)';
+    $('#name').classList.add(snap.exists() ? 'ok' : 'bad');
+  }catch{
+    $('#name').textContent = '(อ่านชื่อไม่สำเร็จ)';
+    $('#name').classList.add('bad');
   }
 
-  const now = new Date();
-  const startMs = now.getTime() - daysBack*24*3600*1000;
-
-  for (let r=1; r<v.length; r++){
-    const d = parseDateFlexible_(v[r][iTS]); if (!d) continue;
-    if (d.getTime() < startMs) continue;
-
-    const sap   = String(v[r][iSAP]||'').trim(); if (!sap) continue;
-    const actId = String(v[r][iAct]||'').trim(); if (!actId) continue;
-
-    const title = (metaMap[actId]?.Title || metaMap[actId]?.Question || actId);
-    const resultBool = _boolFromCell_(v[r][iOK]);
-    const points     = Number(v[r][iPts]||0);
-    const finalized  = (v[r][iFin]===true || String(v[r][iFin]).toLowerCase()==='true');
-
-    _upsertWeekly_(sap, d, actId, title, resultBool, points, finalized);
-  }
-
-  try { buildWinnersToday(); } catch(_) {}
-}
-
-function cronRejudgePending(){
-  // เคลียร์แถวค้าง PENDING แล้ว mirror weekly ย้อนหลังสั้น ๆ
-  reconcilePointsFromSubmissions();
-  rebuildWeeklyFromSubmissions(7);
-}
-
-
+  await checkVersion();
+  await loadAdmins();
+})();
+</script>
+</body>
+</html>
