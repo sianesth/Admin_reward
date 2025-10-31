@@ -1,6 +1,7 @@
 <!doctype html>
 <html lang="th">
 <head>
+<meta http-equiv="Cache-Control" content="no-store" />
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
 <title>ยืนยันการแลก (Admin)</title>
@@ -52,9 +53,9 @@
 </div>
 
 <script>
-/* ========= CONFIG (แก้ให้ตรงระบบ) ========= */
-const GAS_URL = "https://script.google.com/macros/s/AKfycbwPOW_Wk7bZYb3zG4qRciOENbBSMo2TRdfdJxXzC1C5tRxav1R_dlF5SuuXKoEkJi84Ig/exec"; 
-const DB_URL  = "https://anesaplus-default-rtdb.asia-southeast1.firebasedatabase.app";    
+/* ========= CONFIG ========= */
+const GAS_URL = "https://script.google.com/macros/s/AKfycbwPOW_Wk7bZYb3zG4qRciOENbBSMo2TRdfdJxXzC1C5tRxav1R_dlF5SuuXKoEkJi84Ig/exec";
+const DB_URL  = "https://anesaplus-default-rtdb.asia-southeast1.firebasedatabase.app";
 
 /* ========= helpers ========= */
 function $(id){ return document.getElementById(id); }
@@ -84,80 +85,71 @@ function jsonp(params){
   });
 }
 
-/* อ่าน payload จาก QR: รองรับ 2 รูปแบบ
-   1) #p=base64(JSON)   (แนว Admin.html)
-   2) ?sap=...&reward=...&pts=...&ts=... (แนว Admin_002.html)
-*/
+/* ========= decode payload จาก QR (ยืดหยุ่นหลายคีย์) ========= */
 function decodePayload(){
-  // ลองแบบ hash (#p=...)
+  const first = (...xs)=> xs.find(v=> (v!==undefined && v!==null && String(v).trim()!=='')) ?? '';
+
+  // hash: #p=base64(json)
   try{
     const hp = new URLSearchParams(location.hash.slice(1));
     const b64 = hp.get('p');
     if(b64){
       const json = decodeURIComponent(escape(window.atob(b64)));
       const o = JSON.parse(json);
-      return {
-        sap: (o.sap||'').trim(),
-        reward: (o.reward||o.rewardName||'').trim(),
-        pts: Number(o.pts||o.points||0),
-        ts: (o.ts||'').trim()
-      };
+      const sap    = first(o.sap, o.SAP, o.userSap, o.user, o.uid);
+      const reward = first(o.rewardName, o.reward, o.rewardTitle, o.title, o.label, o.name);
+      const pts    = Number(first(o.points, o.pts, o.pointsRequired, o.cost, o.needPoints, o.requiredPoints, o.required));
+      const ts     = first(o.ts, o.timestamp, o.time);
+      return { sap:String(sap||'').trim(), reward:String(reward||'').trim(), pts:(isNaN(pts)?0:pts), ts:String(ts||'').trim() };
     }
   }catch(_){}
-  // ตกลงมาแบบ query string
-  const qs = new URLSearchParams(location.search);
-  return {
-    sap: (qs.get("sap")||"").trim(),
-    reward: (qs.get("rewardName")||qs.get("reward")||"").trim(),
-    pts: Number(qs.get("points")||qs.get("pts")||0),
-    ts: (qs.get("ts")||"").trim()
-  };
+
+  // query: ?sap=...&reward=...&points=...
+  const q = new URLSearchParams(location.search);
+  const sap    = first(q.get('sap'), q.get('SAP'), q.get('userSap'), q.get('user'), q.get('uid'));
+  const reward = first(q.get('rewardName'), q.get('reward'), q.get('rewardTitle'), q.get('title'), q.get('label'), q.get('name'));
+  const pts    = Number(first(q.get('points'), q.get('pts'), q.get('pointsRequired'), q.get('cost'), q.get('needPoints'), q.get('requiredPoints'), q.get('required')));
+  const ts     = first(q.get('ts'), q.get('timestamp'), q.get('time'));
+  return { sap:String(sap||'').trim(), reward:String(reward||'').trim(), pts:(isNaN(pts)?0:pts), ts:String(ts||'').trim() };
 }
 
-/* ดึงชื่อผู้ใช้จาก RTDB (REST) */
+/* ========= RTDB: ดึงชื่อผู้ใช้ ========= */
 async function fetchUserNameFromRTDB(sap){
   if(!sap) return null;
   try{
     const r = await fetch(`${DB_URL}/public/usersSummary/${encodeURIComponent(sap)}.json?t=${Date.now()}`, {cache:'no-store'});
     if(!r.ok) return null;
     const v = await r.json();
-    if(v && typeof v==='object'){
-      return v.name || v.Name || null;
-    }
+    if(v && typeof v==='object') return v.name || v.Name || null;
   }catch(_){}
   return null;
 }
 
-/* โหลดรายชื่อแอดมินจาก GAS (ถ้าไม่ได้ ก็ปล่อยเป็นว่าง) */
+/* ========= โหลดรายชื่อแอดมินจากชีต getAdmins/Admins ========= */
 async function loadAdmins(){
   const sel = $("adminSelect");
   sel.innerHTML = '<option value="">— เลือกชื่อแอดมิน —</option>';
   try{
-    const res = await jsonp({ action: "getAdmins" });
+    const res = await jsonp({ action: "getAdmins" }); // server จะ toLowerCase → 'getadmins'
     const items = (res && res.items) || [];
     if(Array.isArray(items) && items.length){
       for(const it of items){
         const name = (it.name || it).toString();
         const opt = document.createElement('option');
-        opt.value = name;
+        opt.value = name;              // ← ส่ง “ชื่อ” กลับ GAS
         opt.textContent = it.sap ? `${name} (${it.sap})` : name;
         sel.appendChild(opt);
       }
       return;
     }
   }catch(_){}
-  // fallback
-  sel.insertAdjacentHTML('beforeend',
-    sel.insertAdjacentHTML('beforeend',
-  '<option value="Tachawan.jir">Tachawan</option>');
-sel.insertAdjacentHTML('beforeend',
-  '<option value="Dudsadee.atu">Dudsadee</option>');
-sel.insertAdjacentHTML('beforeend',
-  '<option value="Juthawut.una">juthawut</option>');
-
+  // fallback เผื่อเรียกลิสต์ไม่ได้
+  sel.insertAdjacentHTML('beforeend','<option value="Tachawan">Tachawan</option>');
+  sel.insertAdjacentHTML('beforeend','<option value="Dudsadee">Dudsadee</option>');
+  sel.insertAdjacentHTML('beforeend','<option value="Juthawut">Juthawut</option>');
 }
 
-/* ยืนยันแลก → GAS (รองรับ action/act/a เผื่อ backend ใส่ชื่อ param ต่างกัน) */
+/* ========= เรียกยืนยันแลกไป GAS ========= */
 async function confirmRedeemViaGAS(payload){
   let r = await jsonp({ action:'confirmRedeem', ...payload });
   if(r && (r.ok || r.error!=='unknown_action')) return r;
@@ -167,14 +159,14 @@ async function confirmRedeemViaGAS(payload){
   return r;
 }
 
-/* ================= MAIN ================= */
+/* ========= MAIN ========= */
 (async ()=>{
   const data = decodePayload();
   $("sap").textContent    = data.sap || "—";
   $("reward").textContent = data.reward || "—";
   $("points").textContent = data.pts ? fmt(data.pts) : "—";
 
-  // ดึงชื่อผู้ใช้ (RTDB) → ถ้าไม่เจอ ค่อยลองถาม GAS userstatus (เผื่อ RTDB ยังไม่ sync)
+  // ชื่อผู้ใช้: RTDB → fallback GAS
   let userName = await fetchUserNameFromRTDB(data.sap);
   if(!userName){
     try{
@@ -185,7 +177,7 @@ async function confirmRedeemViaGAS(payload){
   $("userName").textContent = userName || "—";
 
   await loadAdmins();
-  
+
   // sync input กับ select
   $("adminSelect").addEventListener("change", e=>{
     if(e.target.value) $("adminName").value = e.target.value;
@@ -208,7 +200,6 @@ async function confirmRedeemViaGAS(payload){
     msg.textContent = "กำลังบันทึก…";
 
     try{
-      // ชื่อฟิลด์ฝั่ง GAS: sap, rewardName, points, adminName, ts
       const res = await confirmRedeemViaGAS({
         sap: data.sap,
         rewardName: data.reward,
@@ -240,5 +231,6 @@ async function confirmRedeemViaGAS(payload){
   $("btnCancel").addEventListener("click", ()=>history.back());
 })();
 </script>
+
 </body>
 </html>
