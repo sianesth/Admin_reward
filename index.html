@@ -94,11 +94,11 @@ import { getDatabase, ref, get } from "https://www.gstatic.com/firebasejs/10.12.
 
 /* ===== CONFIG ===== */
 const firebaseConfig = {
-  apiKey: "AIzaSyCMTpAce-Q-fTkS7xDDYuEpPwgtBIrDP04",
-  authDomain: "anespoint-bfd3d.firebaseapp.com",
-  databaseURL: "https://anesaplus-default-rtdb.asia-southeast1.firebasedatabase.app",
-  projectId: "anespoint-bfd3d",
-  appId: "1:1234567890:web:abcdef123456"
+  apiKey: "AIzaSyAiSW2d16RpHjtUR7OIl2PVpvH_QPL3cp4",
+  authDomain: "anesaplus.firebaseapp.com",
+  databaseURL: "ttps://anesaplus-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId: "anesaplus",
+  appId: "1:518123966097:web:2f93eeb56ec026aa903930"
 };
 // 👉 ใช้ Web App (Deployment ล่าสุด) ที่ลงท้ายด้วย /exec
 const GAS_ENDPOINT = "https://script.google.com/macros/s/AKfycbwPOW_Wk7bZYb3zG4qRciOENbBSMo2TRdfdJxXzC1C5tRxav1R_dlF5SuuXKoEkJi84Ig/exec";
@@ -160,7 +160,7 @@ $('#adminSap').addEventListener('input', (e)=>{
   hint.style.color = '';
 
   if (sap.length < 4){
-    if (sap.length){ hint.textContent = 'กรุณากรอกอย่างน้อย 4 หลัก'; hint.style.color = '#6b78a6'; }
+    if (sap.length){ hint.textContent = 'กรุณากรอกอย่างน้อย 8 หลัก'; hint.style.color = '#6b78a6'; }
     return;
   }
   clearTimeout(_admTimer);
