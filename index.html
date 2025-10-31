@@ -1,225 +1,155 @@
 <!doctype html>
 <html lang="th">
-<meta charset="utf-8"/>
-<meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>Admin — ยืนยันการแลก</title>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>ยืนยันการแลก (Admin)</title>
 <style>
-  :root{--line:#e6e9f2;--txt:#0f1733;--muted:#6b78a6;--brand:#1f6fff;--bg:#f6f8fd;--card:#fff}
-  *{box-sizing:border-box}
-  body{font:15px/1.6 system-ui,Segoe UI,Inter;margin:0;background:var(--bg);color:var(--txt)}
-  .card{max-width:720px;margin:24px auto;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px}
-  .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
-  select,button{border-radius:10px;border:1px solid var(--line);padding:9px 12px;font:inherit}
-  button{cursor:pointer;background:var(--brand);color:#fff;border-color:transparent}
-  .muted{color:var(--muted)}
-  .kv{display:grid;grid-template-columns:140px 1fr;gap:8px 12px}
-  .kv div:nth-child(odd){color:var(--muted)}
-  .ok{color:#0a8d4c}.bad{color:#d93025}
-  .note{font-size:12px;margin-top:6px}
-
-body{
-  font-family: "Sarabun", system-ui, -apple-system, "Segoe UI", Inter, sans-serif;
-  background: var(--bg);
-  color: var(--txt);
-}
-h2{
-  font-weight: 700;
-  font-size: 20px;
-  color: #0f1733;
-  margin-top: 0;
-}
-.card{
-  box-shadow: 0 4px 18px rgba(0,0,0,.05);
-}
-button{
-  transition: background .2s, transform .1s;
-}
-button:hover{ filter: brightness(1.05); }
-button:active{ transform: translateY(1px); }
-
-<style>
-  /* ทำให้คอนเทนต์ขยายเต็มจอ และสูงอย่างน้อยเท่าหน้าจอ */
-  html, body { height: 100%; }
-  body { margin: 0; background:#f6f8fd; }
-
-  /* คอนเทนต์หลักให้กว้าง 100% ไม่จำกัด max-width */
-  main, .wrap, .container, .page, .content {
-    max-width: none !important;
-    width: 100% !important;
-  }
-
-  /* เว้นระยะรอบ ๆ ให้ดูโปร่ง และให้สูงขั้นต่ำเต็ม viewport */
-  main, .wrap, .page, .content {
-    padding: 20px clamp(14px, 4vw, 28px) 28px;
-    min-height: 100vh;               /* สูงอย่างน้อยเต็มจอ */
-    box-sizing: border-box;
-  }
-
-  /* การ์ดฟอร์มให้ขยายเต็มความกว้าง */
-  .card, .panel, .box {
-    width: 100%;
-    border-radius: 16px;
-    border: 1px solid #e9eef7;
-    box-shadow: 0 8px 24px rgba(15,23,51,.06);
-  }
+  :root{ --bg:#f6f8fd;--card:#fff;--line:#e6e9f2;--txt:#0f1733;--muted:#6b78a6;--ok:#0a8c4a;--danger:#d93025;--btn:#1f6fff;}
+  body{margin:0;background:var(--bg);font:16px/1.6 system-ui,-apple-system,Segoe UI,Inter,Roboto,Arial,sans-serif;color:var(--txt);}
+  .wrap{max-width:620px;margin:24px auto;padding:16px;}
+  .card{background:#fff;border:1px solid var(--line);border-radius:14px;box-shadow:0 10px 30px rgba(15,23,51,.06);padding:20px;}
+  h1{margin:0 0 8px;font-size:22px}
+  .row{display:flex;gap:12px;align-items:center;margin:10px 0}
+  .key{width:140px;color:var(--muted)}
+  input,select,button{font:inherit;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:#fff}
+  input,select{flex:1}
+  .btn{background:var(--btn);color:#fff;border:none;cursor:pointer}
+  .btn[disabled]{opacity:.5;cursor:not-allowed}
+  .hint{color:var(--muted);font-size:13px}
+  .ok{color:var(--ok)} .err{color:var(--danger)}
+  .pill{display:inline-block;background:#eef3ff;border:1px solid #dfe7ff;padding:4px 10px;border-radius:999px;font-size:13px}
+  .mt{margin-top:16px}
 </style>
-
+</head>
 <body>
+<div class="wrap">
   <div class="card">
-    <h2>✅ ยืนยันการแลก (Admin)</h2>
-    <div id="info" class="muted">ตรวจสอบข้อมูลการแลกรางวัลให้ถูกต้อง</div>
-    <div class="note muted" id="ver">เชื่อมต่อ…</div>
+    <h1>✅ ยืนยันการแลก (Admin)</h1>
+    <p class="hint">ตรวจสอบข้อมูลการแลกรางวัลให้ถูกต้อง</p>
 
-    <div id="detail" style="margin-top:12px" class="kv">
-      <div>SAP</div><div id="sap">—</div>
-      <div>ชื่อผู้แลก</div><div id="name" class="muted">กำลังดึง...</div>
-      <div>รางวัล</div><div id="reward">—</div>
-      <div>แต้มที่ใช้</div><div id="points">—</div>
+    <div class="row"><div class="key">SAP</div><div id="sap" class="pill">—</div></div>
+    <div class="row"><div class="key">ชื่อผู้แลก</div><div id="userName" class="pill">กำลังดึง…</div></div>
+    <div class="row"><div class="key">รางวัล</div><div id="reward" class="pill">—</div></div>
+    <div class="row"><div class="key">แต้มที่ใช้</div><div id="points" class="pill">—</div></div>
+
+    <div class="row mt">
+      <div class="key">รับแลกโดย</div>
+      <input id="adminName" placeholder="ชื่อจริง เช่น จุฑาวุฒิ">
+    </div>
+    <div class="row">
+      <div class="key">หรือเลือก</div>
+      <select id="adminSelect"><option value="">— โหลดรายชื่อแอดมิน… —</option></select>
     </div>
 
-    <div class="row" style="margin-top:14px">
-      <label for="adminSel" class="muted">รับแลกโดย</label>
-      <select id="adminSel" style="min-width:220px">
-        <option value="">— เลือกแอดมิน —</option>
-      </select>
-      <button id="btnConfirm">ยืนยันการแลก</button>
+    <div class="row mt">
+      <button id="btnConfirm" class="btn">ยืนยันแลก</button>
+      <button id="btnCancel" type="button">ยกเลิก</button>
     </div>
 
-    <div id="status" class="muted" style="margin-top:10px"></div>
+    <p id="msg" class="mt hint"></p>
   </div>
+</div>
 
-<script type="module">
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
-import { getDatabase, ref, get } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-database.js";
+<script>
+const GAS_URL = "https://script.google.com/macros/s/AKfycbwPOW_Wk7bZYb3zG4qRciOENbBSMo2TRdfdJxXzC1C5tRxav1R_dlF5SuuXKoEkJi84Ig/exec";
+const qs = new URLSearchParams(location.search);
+function $(id){ return document.getElementById(id); }
 
-/* ===== CONFIG ===== */
-const firebaseConfig = {
-  apiKey: "AIzaSyAiSW2d16RpHjtUR7OIl2PVpvH_QPL3cp4",
-  authDomain: "anesaplus.firebaseapp.com",
-  databaseURL: "https://anesaplus-default-rtdb.asia-southeast1.firebasedatabase.app",
-  projectId: "anesaplus",
-  appId: "1:518123966097:web:2f93eeb56ec026aa903930"
-};
-// 👉 เปลี่ยนให้ตรงกับ Deploy ล่าสุดของ Apps Script ( /exec )
-const GAS_ENDPOINT = "https://script.google.com/macros/s/AKfycbwPOW_Wk7bZYb3zG4qRciOENbBSMo2TRdfdJxXzC1C5tRxav1R_dlF5SuuXKoEkJi84Ig/exec";
-
-
-const app = initializeApp(firebaseConfig);
-const db  = getDatabase(app);
-
-const $ = q => document.querySelector(q);
-const fmt = n => Number(n||0).toLocaleString('th-TH');
-
-/* ===== JSONP helper ===== */
-function api(body){
+// ---------- JSONP helper ----------
+function jsonp(params){
   return new Promise((resolve,reject)=>{
-    const cb='cb_'+Math.random().toString(36).slice(2);
-    window[cb]=d=>{ resolve(d); delete window[cb]; s.remove(); };
-    const qs=new URLSearchParams({...body,callback:cb}).toString();
-    const s=document.createElement('script');
-    s.src=`${GAS_ENDPOINT}?${qs}`;
-    s.onerror=()=>reject(new Error('GAS error'));
-    document.body.appendChild(s);
+    const cb = "cb_"+Math.random().toString(36).slice(2);
+    params.callback = cb;
+    const url = GAS_URL + "?" + new URLSearchParams(params).toString();
+    const s = document.createElement("script");
+    const timer = setTimeout(()=>{ cleanup(); reject(new Error("timeout")); }, 15000);
+    function cleanup(){ delete window[cb]; s.remove(); clearTimeout(timer); }
+    window[cb] = (res)=>{ cleanup(); resolve(res); };
+    s.onerror = ()=>{ cleanup(); reject(new Error("network_error")); };
+    s.src = url; document.body.appendChild(s);
   });
 }
 
-/* ===== payload จาก QR ===== */
-function decodePayload(){
-  try{
-    const params=new URLSearchParams(location.hash.slice(1));
-    const b64=params.get('p'); if(!b64) return null;
-    const json=decodeURIComponent(escape(window.atob(b64)));
-    return JSON.parse(json);
-  }catch(e){ return null; }
+// ---------- อ่าน params จาก QR ----------
+const sap    = (qs.get("sap")||"").trim();
+const reward = (qs.get("rewardName")||qs.get("reward")||"").trim();
+const points = Number(qs.get("points")||qs.get("pts")||0);
+const ts     = (qs.get("ts")||"").trim();
+
+$("sap").textContent = sap || "—";
+$("reward").textContent = reward || "—";
+$("points").textContent = points || "—";
+
+// ---------- โหลดรายชื่อแอดมิน ----------
+jsonp({ action:"getadmins" }).then(res=>{
+  const sel = $("adminSelect");
+  sel.innerHTML = '<option value="">— เลือกชื่อแอดมิน —</option>';
+  (res.items||[]).forEach(it=>{
+    const opt = document.createElement("option");
+    opt.value = it.name;
+    opt.textContent = it.name + " (" + it.sap + ")";
+    sel.appendChild(opt);
+  });
+}).catch(()=>{ $("adminSelect").innerHTML = '<option value="">— ไม่พบรายชื่อ —</option>'; });
+
+$("adminSelect").addEventListener("change", e=>{
+  if(e.target.value) $("adminName").value = e.target.value;
+});
+
+// ---------- ดึงชื่อผู้ใช้ ----------
+if(sap){
+  jsonp({ action:"userstatus", sap }).then(res=>{
+    $("userName").textContent = res && res.name ? res.name : "—";
+  }).catch(()=>{ $("userName").textContent = "—"; });
 }
 
-/* ===== โหลดรายชื่อแอดมิน ===== */
-async function loadAdmins(){
-  const sel = $('#adminSel');
-  sel.innerHTML = '<option value="">— เลือกแอดมิน —</option>';
-  try{
-    const r = await api({action:'getadmins'});
-    const items = (r && r.ok && Array.isArray(r.items)) ? r.items : [];
-    if(!items.length){
-      sel.innerHTML = '<option value="">(ไม่พบรายชื่อแอดมิน)</option>';
-      return;
-    }
-    sel.innerHTML = '<option value="">— เลือกแอดมิน —</option>' +
-      items.map(x => `<option value="${(x.sap||'').trim()}">${(x.name||'').trim()} (${(x.sap||'').trim()})</option>`).join('');
-  }catch(e){
-    sel.innerHTML = '<option value="">โหลดรายชื่อแอดมินไม่สำเร็จ</option>';
+// ---------- ฟังก์ชันอธิบาย error ----------
+function explain(err){
+  switch(String(err||'').toLowerCase()){
+    case 'missing_params': return 'ข้อมูลไม่ครบ (SAP, รางวัล, แต้ม, แอดมิน)';
+    case 'user_not_found': return 'ไม่พบผู้ใช้ในระบบ';
+    case 'reward_not_found': return 'ไม่พบชื่อรางวัล';
+    case 'out_of_stock': return 'ของรางวัลหมดสต็อก';
+    case 'not_enough_points': return 'แต้มไม่เพียงพอ';
+    default: return 'ไม่สามารถบันทึกได้ ('+(err||'unknown')+')';
   }
 }
 
-/* ===== ตรวจ version ของปลายทาง (กันยิงผิดตัว) ===== */
-async function checkVersion(){
+// ---------- ยืนยันแลก ----------
+let locking = false;
+$("btnConfirm").addEventListener("click", async ()=>{
+  if(locking) return;
+  const adminName = $("adminName").value.trim();
+  const msg = $("msg");
+  msg.className = "mt hint";
+  if(!sap || !reward || !points){ msg.textContent = "❌ ข้อมูลไม่ครบจาก QR"; return; }
+  if(!adminName){ msg.textContent = "กรุณาพิมพ์ชื่อแอดมิน"; $("adminName").focus(); return; }
+
+  $("btnConfirm").disabled = true;
+  locking = true;
+  msg.textContent = "กำลังบันทึก…";
+
   try{
-    const r = await api({action:'version'});
-    if(r && r.ok){
-      $('#ver').textContent = `เชื่อมต่อฐานข้อมูล`;
+    const res = await jsonp({ action:"confirmredeem", sap, rewardName:reward, points, adminName, ts });
+    if(res && res.ok){
+      msg.className = "mt ok";
+      msg.textContent = "✅ บันทึกสำเร็จ — หน้านี้จะปิดอัตโนมัติ";
+      setTimeout(()=>window.close(),1500);
     }else{
-      $('#ver').textContent = 'เชื่อมต่อ Apps Script ไม่สำเร็จ';
+      msg.className = "mt err";
+      msg.textContent = "❌ " + explain(res && res.error);
+      $("btnConfirm").disabled = false;
+      locking = false;
     }
-  }catch(e){
-    $('#ver').textContent = 'เชื่อมต่อ Apps Script ไม่สำเร็จ';
+  }catch(err){
+    msg.className = "mt err"; msg.textContent = "❌ เกิดข้อผิดพลาดในการเชื่อมต่อ";
+    $("btnConfirm").disabled = false;
+    locking = false;
   }
-}
+});
 
-/* ===== main ===== */
-const data = decodePayload();
-if(!data){
-  $('#status').textContent = 'ไม่พบข้อมูลจาก QR';
-}else{
-  $('#sap').textContent    = data.sap || '—';
-  $('#reward').textContent = data.reward || '—';
-  $('#points').textContent = fmt(data.pts || 0);
-  try{
-    const snap = await get(ref(db, 'public/usersSummary/'+data.sap));
-    const v = snap.exists() ? snap.val() : {};
-    $('#name').textContent = v.name || '(ไม่พบชื่อในระบบ)';
-    if(!snap.exists()){ $('#name').classList.add('bad'); } else { $('#name').classList.add('ok'); }
-  }catch(e){
-    $('#name').textContent = '(อ่านชื่อไม่สำเร็จ)'; $('#name').classList.add('bad');
-  }
-}
-await checkVersion(); 
-await loadAdmins();
-
-/* ===== ยืนยันการแลก (ลองส่ง 3 รูปแบบ: action / act / a) ===== */
-async function confirmRedeem(payload){
-  // 1) action
-  let r = await api({action:'confirmRedeem', ...payload});
-  if(r && (r.ok || r.error!=='unknown_action')) return r;
-
-  // 2) act
-  r = await api({act:'confirmRedeem', ...payload});
-  if(r && (r.ok || r.error!=='unknown_action')) return r;
-
-  // 3) a
-  r = await api({a:'confirmRedeem', ...payload});
-  return r;
-}
-
-$('#btnConfirm').onclick = async()=>{
-  if(!data) return;
-  const adminSAP = ($('#adminSel').value||'').trim();
-  const adminText = $('#adminSel').selectedOptions[0]?.textContent || '';
-  if(!adminSAP){ $('#status').textContent = 'กรุณาเลือกแอดมิน'; return; }
-  $('#status').textContent='กำลังยืนยัน...';
-
-  const payload = { sap:data.sap, rewardName:data.reward, adminSAP:adminSAP, ts:data.ts, points:data.pts };
-  const r = await confirmRedeem(payload);
-
-  if(r && r.ok){
-    if(r && r.ok){ $('#status').innerHTML = `สำเร็จ ✓ โดย ${adminText} | สต็อกรางวัลคงเหลือ: <b>${fmt(r.stockAfter)}</b>`;
-    $('#status').classList.remove('bad'); $('#status').classList.add('ok');
-    $('#btnConfirm').disabled = true; $('#adminSel').disabled = true;
-  }else{
-    const extra = r && (r.received || (r.echo ? JSON.stringify(r.echo) : ""));
-    $('#status').textContent = 'ไม่สำเร็จ: ' + (r && r.error ? r.error : 'เกิดข้อผิดพลาด') + (extra ? ` (${extra})` : '');
-    $('#status').classList.remove('ok'); $('#status').classList.add('bad');
-  }
-};
+$("btnCancel").addEventListener("click", ()=>history.back());
 </script>
 </body>
 </html>
