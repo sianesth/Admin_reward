@@ -44,14 +44,10 @@
   </div>
 
 <script type="module">
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
-import { getDatabase, ref, get } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-database.js";
-
 /* ===== CONFIG ===== */
 const firebaseConfig = {
   apiKey: "AIzaSyAiSW2d16RpHjtUR7OIl2PVpvH_QPL3cp4",
   authDomain: "anesaplus.firebaseapp.com",
-  // ⚠️ แก้ให้มี h ตรง https
   databaseURL: "https://anesaplus-default-rtdb.asia-southeast1.firebasedatabase.app",
   projectId: "anesaplus",
   appId: "1:518123966097:web:2f93eeb56ec026aa903930"
@@ -158,15 +154,20 @@ $('#btnConfirm').addEventListener('click', async ()=>{
   $('#points').textContent = fmt(data.pts || 0);
 
   // ชื่อผู้ใช้จาก RTDB
-  try{
-    const snap = await get(ref(db, 'public/usersSummary/'+(data.sap||'')));
-    const v = snap.exists() ? snap.val() : {};
-    $('#name').textContent = v.name || '(ไม่พบชื่อในระบบ)';
-    $('#name').classList.add(snap.exists() ? 'ok' : 'bad');
-  }catch{
+  // แทนส่วนที่เคยอ่านจาก RTDB
+try{
+  const r = await api({ action:'userstatus', sap: data.sap });  // <- อ่านจากชีต Users ผ่าน Apps Script
+  if (r && r.ok) {
+    $('#name').textContent = r.name || data.sap;
+    $('#name').classList.add(r.active ? 'ok' : 'bad');
+  } else {
     $('#name').textContent = '(อ่านชื่อไม่สำเร็จ)';
     $('#name').classList.add('bad');
   }
+}catch(_){
+  $('#name').textContent = '(อ่านชื่อไม่สำเร็จ)';
+  $('#name').classList.add('bad');
+}
 
   await checkVersion();
   await loadAdmins();
