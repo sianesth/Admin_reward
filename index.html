@@ -133,7 +133,7 @@ $('#btnConfirm').addEventListener('click', async ()=>{
   statusEl.textContent = 'กำลังบันทึกการแลก...';
   try{
     const r = await api({
-      action:'confirmRedeem',
+      action:'confirmredeem',
       sap: payload.sap,
       reward: payload.reward,
       points: payload.pts,
