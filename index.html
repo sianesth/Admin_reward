@@ -125,6 +125,44 @@ async function fetchUserNameFromRTDB(sap){
   }catch(_){}
   return null;
 }
+/* ========= RTDB: ดึงแต้มคงเหลือผู้ใช้ ========= */
+async function fetchUserPointsFromRTDB(sap){
+  if(!sap) return null;
+  try{
+    const r = await fetch(`${DB_URL}/public/usersSummary/${encodeURIComponent(sap)}.json?t=${Date.now()}`, {cache:'no-store'});
+    if(!r.ok) return null;
+    const v = await r.json();
+    if(v && typeof v==='object'){
+      return v.pointsTotal ?? v.PointsTotal ?? v.total ?? v.balance ?? null;
+    }
+  }catch(_){}
+  return null;
+}
+
+/* ========= RTDB: ดึงสต็อกรางวัลคงเหลือ ========= */
+async function fetchRewardStockFromRTDB(rewardName){
+  if(!rewardName) return null;
+  try{
+    const r = await fetch(`${DB_URL}/public/rewards/${encodeURIComponent(rewardName)}.json?t=${Date.now()}`, {cache:'no-store'});
+    if(r.ok){
+      const v = await r.json();
+      if(v && typeof v==='object'){
+        return v.stock ?? v.Stock ?? v.qty ?? v.Qty ?? null;
+      }
+    }
+  }catch(_){}
+  return null;
+}
+
+/* ========= retry helper กันดีเลย์ ========= */
+async function retry(fn, times=6, delay=250){
+  for(let i=0;i<times;i++){
+    const v = await fn();
+    if(v !== null && v !== undefined && v !== '') return v;
+    await new Promise(r=>setTimeout(r, delay));
+  }
+  return null;
+}
 
 /* ========= โหลดรายชื่อแอดมินจากชีต getAdmins/Admins ========= */
 async function loadAdmins(){
@@ -222,11 +260,29 @@ let locking = false;
       });
 
       if(res && res.ok){
-        const afterTotal = ('totalAfter' in res) ? fmt(res.totalAfter) : '—';
-        const afterStock = ('stockAfter' in res) ? fmt(res.stockAfter) : '—';
+
+        // 1) ถ้า GAS ส่งค่ากลับมาก็ใช้เลย
+        let totalAfter = (res && ('totalAfter' in res)) ? res.totalAfter : null;
+        let stockAfter = (res && ('stockAfter' in res)) ? res.stockAfter : null;
+
+        // 2) ถ้าไม่มี → ไปดึงค่าล่าสุดจาก RTDB (ไม่แตะ Apps Script)
+        if(totalAfter === null || totalAfter === undefined){
+          totalAfter = await retry(()=>fetchUserPointsFromRTDB(data.sap));
+        }
+        if(stockAfter === null || stockAfter === undefined){
+          stockAfter = await retry(()=>fetchRewardStockFromRTDB(data.reward));
+        }
+
+        const afterTotalTxt = (totalAfter===null || totalAfter===undefined) ? '—' : fmt(totalAfter);
+        const afterStockTxt = (stockAfter===null || stockAfter===undefined) ? '—' : fmt(stockAfter);
+
         msg.className = "mt ok";
-        msg.innerHTML = `✅ สำเร็จ — แต้มคงเหลือผู้ใช้: <b>${afterTotal}</b> | สต็อกรางวัลคงเหลือ: <b>${afterStock}</b><br>หน้านี้จะปิดอัตโนมัติ`;
+        msg.innerHTML = `✅ ดำเนินการแลกรางวัลสำเร็จ<br>
+        แต้มคงเหลือผู้ใช้: <b>${afterTotalTxt}</b> | สต็อกรางวัลคงเหลือ: <b>${afterStockTxt}</b><br>
+        หน้านี้จะปิดอัตโนมัติ`;
+
         setTimeout(()=>window.close(), 1500);
+
       }else{
         $("btnConfirm").disabled = false;
         locking = false;
@@ -243,6 +299,7 @@ let locking = false;
 
   $("btnCancel").addEventListener("click", ()=>history.back());
 })();
+
 </script>
 
 </body>
