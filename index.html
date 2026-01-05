@@ -37,8 +37,8 @@
     <div class="row mt">
       <div class="key">รับแลกโดย</div>
       <input id="adminName" placeholder="ชื่อจริง เช่น จุฑาวุฒิ">
-          <input id="adminSAP" type="hidden" value="">
-</div>
+      <input id="adminSAP" type="hidden" value="">
+    </div>
     <div class="row">
       <div class="key">หรือเลือก</div>
       <select id="adminSelect"><option value="">— โหลดรายชื่อแอดมิน… —</option></select>
@@ -52,6 +52,11 @@
     <p id="msg" class="mt hint"></p>
   </div>
 </div>
+
+<footer style="text-align:center;color:#8b94b2;font-size:11px;margin:8px 0">
+  © 2025 | ภาควิชาวิสัญญีวิทยา คณะแพทยศาสตร์ศิริราชพยาบาล | Version 1.0 by Zuree.Yoo
+
+</footer>
 
 <script>
 /* ========= CONFIG ========= */
@@ -125,6 +130,7 @@ async function fetchUserNameFromRTDB(sap){
   }catch(_){}
   return null;
 }
+
 /* ========= RTDB: ดึงแต้มคงเหลือผู้ใช้ ========= */
 async function fetchUserPointsFromRTDB(sap){
   if(!sap) return null;
@@ -229,7 +235,9 @@ async function confirmRedeemViaGAS(payload){
       if(name) $("adminName").value = name;
     }
   });
-let locking = false;
+
+  let locking = false;
+
   $("btnConfirm").addEventListener("click", async ()=>{
     if(locking) return;
     const msg = $("msg");
@@ -245,7 +253,9 @@ let locking = false;
     const adminName = adminNameInput || adminNameAuto;
     if(!adminName && !adminSAP){ msg.textContent = "กรุณาเลือก/พิมพ์ชื่อแอดมิน"; $("adminName").focus(); return; }
 
+    // disable ระหว่างบันทึก (กันเผลอกดยกเลิก)
     $("btnConfirm").disabled = true;
+    $("btnCancel").disabled  = true;
     locking = true;
     msg.textContent = "กำลังบันทึก…";
 
@@ -260,7 +270,6 @@ let locking = false;
       });
 
       if(res && res.ok){
-
         // 1) ถ้า GAS ส่งค่ากลับมาก็ใช้เลย
         let totalAfter = (res && ('totalAfter' in res)) ? res.totalAfter : null;
         let stockAfter = (res && ('stockAfter' in res)) ? res.stockAfter : null;
@@ -278,19 +287,26 @@ let locking = false;
 
         msg.className = "mt ok";
         msg.innerHTML = `✅ ดำเนินการแลกรางวัลสำเร็จ<br>
-        แต้มคงเหลือผู้ใช้: <b>${afterTotalTxt}</b> | สต็อกรางวัลคงเหลือ: <b>${afterStockTxt}</b><br>
-        หน้านี้จะปิดอัตโนมัติ`;
+        แต้มคงเหลือผู้ใช้: <b>${afterTotalTxt}</b> | สต็อกรางวัลคงเหลือ: <b>${afterStockTxt}</b>`;
 
-        setTimeout(()=>window.close(), 1500);
+        // 🔒 ล็อกทั้งหมด: ต้องสแกน QR ใหม่เท่านั้น
+        $("btnConfirm").disabled = true;
+        $("btnCancel").disabled  = true;
+        $("adminName").disabled  = true;
+        $("adminSelect").disabled = true;
+        locking = true;
 
       }else{
+        // fail → ปลดล็อกให้ลองใหม่ได้
         $("btnConfirm").disabled = false;
+        $("btnCancel").disabled  = false;
         locking = false;
         msg.className = "mt err";
         msg.textContent = "❌ " + explain(res && res.error);
       }
     }catch(e){
       $("btnConfirm").disabled = false;
+      $("btnCancel").disabled  = false;
       locking = false;
       msg.className = "mt err";
       msg.textContent = "❌ เกิดข้อผิดพลาดในการเชื่อมต่อ";
@@ -299,8 +315,6 @@ let locking = false;
 
   $("btnCancel").addEventListener("click", ()=>history.back());
 })();
-
 </script>
-
 </body>
 </html>
