@@ -37,7 +37,8 @@
     <div class="row mt">
       <div class="key">รับแลกโดย</div>
       <input id="adminName" placeholder="ชื่อจริง เช่น จุฑาวุฒิ">
-    </div>
+          <input id="adminSAP" type="hidden" value="">
+</div>
     <div class="row">
       <div class="key">หรือเลือก</div>
       <select id="adminSelect"><option value="">— โหลดรายชื่อแอดมิน… —</option></select>
@@ -136,7 +137,8 @@ async function loadAdmins(){
       for(const it of items){
         const name = (it.name || it).toString();
         const opt = document.createElement('option');
-        opt.value = name;              // ← ส่ง “ชื่อ” กลับ GAS
+        opt.value = (it.sap || '').toString(); // value = SAP (ปลอดภัยกว่า)
+        opt.dataset.name = name;
         opt.textContent = it.sap ? `${name} (${it.sap})` : name;
         sel.appendChild(opt);
       }
@@ -180,10 +182,16 @@ async function confirmRedeemViaGAS(payload){
 
   // sync input กับ select
   $("adminSelect").addEventListener("change", e=>{
-    if(e.target.value) $("adminName").value = e.target.value;
+    const sel = e.target;
+    const sap = (sel.value || "").trim();
+    const opt = sel.options[sel.selectedIndex];
+    const name = (opt && opt.dataset && opt.dataset.name) ? String(opt.dataset.name) : "";
+    if(sap){
+      $("adminSAP").value = sap;
+      if(name) $("adminName").value = name;
+    }
   });
-
-  let locking = false;
+let locking = false;
   $("btnConfirm").addEventListener("click", async ()=>{
     if(locking) return;
     const msg = $("msg");
@@ -192,8 +200,12 @@ async function confirmRedeemViaGAS(payload){
     if(!data.sap || !data.reward || !data.pts){
       msg.textContent = "❌ ข้อมูลไม่ครบจาก QR"; return;
     }
-    const adminName = $("adminName").value.trim() || $("adminSelect").value.trim();
-    if(!adminName){ msg.textContent = "กรุณาเลือก/พิมพ์ชื่อแอดมิน"; $("adminName").focus(); return; }
+    const adminNameInput = $("adminName").value.trim();
+    const adminSAP = $("adminSAP").value.trim() || $("adminSelect").value.trim();
+    const opt = $("adminSelect").options[$("adminSelect").selectedIndex];
+    const adminNameAuto = (opt && opt.dataset && opt.dataset.name) ? String(opt.dataset.name).trim() : "";
+    const adminName = adminNameInput || adminNameAuto;
+    if(!adminName && !adminSAP){ msg.textContent = "กรุณาเลือก/พิมพ์ชื่อแอดมิน"; $("adminName").focus(); return; }
 
     $("btnConfirm").disabled = true;
     locking = true;
@@ -205,6 +217,7 @@ async function confirmRedeemViaGAS(payload){
         rewardName: data.reward,
         points: data.pts,
         adminName,
+        adminSAP,
         ts: data.ts
       });
 
