@@ -55,7 +55,7 @@
 
 <footer style="text-align:center;color:#8b94b2;font-size:11px;margin:8px 0">
   © 2025 | ภาควิชาวิสัญญีวิทยา คณะแพทยศาสตร์ศิริราชพยาบาล<br>
-  <span style="font-size:10px;opacity:.85">Version 1.0 by Zuree.Yoo</span>
+  <span style="font-size:10px;opacity:.85">Version 1.0.1 Redeem Fix by Zuree.Yoo</span>
 </footer>
 
 <script>
@@ -73,6 +73,7 @@ function explain(err){
   if(e==='reward_not_found')  return 'ไม่พบชื่อรางวัล';
   if(e==='out_of_stock')      return 'ของรางวัลหมดสต็อก';
   if(e==='not_enough_points') return 'แต้มไม่เพียงพอ';
+  if(e==='feature_closed')     return 'ระบบปิดโหมดแลกรางวัลฝั่งผู้ใช้ แต่หน้า Admin เวอร์ชันแก้ไขจะยังยืนยัน QR ที่สร้างแล้วได้ กรุณาอัปเดต Apps Script เป็นไฟล์ REDEEM_FIX_FINAL';
   return 'ไม่สามารถบันทึกได้ ('+(err||'unknown')+')';
 }
 
