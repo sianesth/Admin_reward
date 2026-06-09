@@ -2,93 +2,101 @@
 <html lang="th">
 <head>
 <meta charset="utf-8"/>
-<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
 <title>Admin — ยืนยันการแลก</title>
 <style>
-  :root{
-    --line:#e6e9f2;--txt:#0f1733;--muted:#6b78a6;--brand:#1f6fff;
-    --bg:#f6f8fd;--card:#fff;--ok:#0a8d4c;--bad:#d93025;--soft:#f1f5ff;
-  }
+  :root{--line:#e6e9f2;--txt:#0f1733;--muted:#6b78a6;--brand:#1f6fff;--bg:#f6f8fd;--card:#fff}
   *{box-sizing:border-box}
-  html,body{min-height:100%;margin:0;background:var(--bg);}
-  body{
-    font:16px/1.6 "Sarabun",system-ui,-apple-system,"Segoe UI",Inter,sans-serif;
-    color:var(--txt);
-    padding:clamp(14px,4vw,28px);
-  }
-  .card{
-    width:100%;
-    max-width:720px;
-    margin:24px auto;
-    background:var(--card);
-    border:1px solid var(--line);
-    border-radius:18px;
-    padding:clamp(18px,4vw,28px);
-    box-shadow:0 10px 28px rgba(15,23,51,.08);
-  }
-  h2{font-weight:800;font-size:clamp(22px,5vw,34px);line-height:1.25;margin:0 0 10px;color:#0f1733}
+  body{font:15px/1.6 system-ui,Segoe UI,Inter;margin:0;background:var(--bg);color:var(--txt)}
+  .card{max-width:720px;margin:24px auto;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px}
+  .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+  select,button{border-radius:10px;border:1px solid var(--line);padding:9px 12px;font:inherit}
+  button{cursor:pointer;background:var(--brand);color:#fff;border-color:transparent}
   .muted{color:var(--muted)}
-  .note{font-size:13px;margin-top:4px}
-  .kv{display:grid;grid-template-columns:minmax(96px,140px) 1fr;gap:12px 14px;margin-top:18px;align-items:center}
-  .kv div:nth-child(odd){color:var(--muted);font-weight:650}
-  .pill{display:inline-block;background:var(--soft);border:1px solid #dfe7fb;border-radius:999px;padding:5px 14px;max-width:100%;overflow-wrap:anywhere}
-  .row{display:flex;gap:12px;flex-wrap:wrap;align-items:center;margin-top:18px}
-  select,button{
-    min-height:46px;border-radius:14px;border:1px solid var(--line);
-    padding:10px 14px;font:inherit;background:#fff;
+  .kv{display:grid;grid-template-columns:140px 1fr;gap:8px 12px}
+  .kv div:nth-child(odd){color:var(--muted)}
+  .ok{color:#0a8d4c}.bad{color:#d93025}
+  .note{font-size:12px;margin-top:6px}
+
+body{
+  font-family: "Sarabun", system-ui, -apple-system, "Segoe UI", Inter, sans-serif;
+  background: var(--bg);
+  color: var(--txt);
+}
+h2{
+  font-weight: 700;
+  font-size: 20px;
+  color: #0f1733;
+  margin-top: 0;
+}
+.card{
+  box-shadow: 0 4px 18px rgba(0,0,0,.05);
+}
+button{
+  transition: background .2s, transform .1s;
+}
+button:hover{ filter: brightness(1.05); }
+button:active{ transform: translateY(1px); }
+
+  /* ทำให้คอนเทนต์ขยายเต็มจอ และสูงอย่างน้อยเท่าหน้าจอ */
+  html, body { height: 100%; }
+  body { margin: 0; background:#f6f8fd; }
+
+  /* คอนเทนต์หลักให้กว้าง 100% ไม่จำกัด max-width */
+  main, .wrap, .container, .page, .content {
+    max-width: none !important;
+    width: 100% !important;
   }
-  select{min-width:min(100%,260px)}
-  button{
-    cursor:pointer;background:var(--brand);color:#fff;border-color:transparent;
-    font-weight:800;transition:filter .2s,transform .1s,opacity .2s;
+
+  /* เว้นระยะรอบ ๆ ให้ดูโปร่ง และให้สูงขั้นต่ำเต็ม viewport */
+  main, .wrap, .page, .content {
+    padding: 20px clamp(14px, 4vw, 28px) 28px;
+    min-height: 100vh;               /* สูงอย่างน้อยเต็มจอ */
+    box-sizing: border-box;
   }
-  button.secondary{background:#fff;color:var(--brand);border-color:var(--line)}
-  button:hover{filter:brightness(1.04)}
-  button:active{transform:translateY(1px)}
-  button:disabled{opacity:.55;cursor:not-allowed;transform:none}
-  #status{margin-top:18px;font-size:17px;font-weight:700}
-  .ok{color:var(--ok)}.bad{color:var(--bad)}
-  .footer{text-align:center;color:#9aa4bb;margin:28px auto 0;font-size:13px}
-  @media (max-width:520px){
-    body{padding:14px}
-    .card{margin:16px auto;padding:18px;border-radius:16px}
-    .kv{grid-template-columns:105px 1fr;gap:12px 10px}
-    .row{align-items:stretch}
-    select,button{width:100%}
+
+  /* การ์ดฟอร์มให้ขยายเต็มความกว้าง */
+  .card, .panel, .box {
+    width: 100%;
+    border-radius: 16px;
+    border: 1px solid #e9eef7;
+    box-shadow: 0 8px 24px rgba(15,23,51,.06);
+  }
+
+  html,body{max-width:100%;overflow-x:hidden;-webkit-text-size-adjust:100%;}
+  .card{width:min(720px,calc(100vw - 24px));}
+  select,button{max-width:100%;font-size:16px;}
+  @media(max-width:560px){
+    .card{margin:12px auto;padding:14px;}
+    .kv{grid-template-columns:110px 1fr;gap:6px 10px;}
+    .row{align-items:stretch;}
+    #adminSel,#btnConfirm{width:100%;}
   }
 </style>
+
 </head>
 <body>
   <div class="card">
     <h2>✅ ยืนยันการแลก (Admin)</h2>
-    <div id="info" class="muted">ตรวจสอบข้อมูลการแลกรางวัลให้ถูกต้องก่อนกดยืนยัน</div>
+    <div id="info" class="muted">ตรวจสอบข้อมูลการแลกรางวัลให้ถูกต้อง</div>
     <div class="note muted" id="ver">เชื่อมต่อ…</div>
 
-    <div id="detail" class="kv">
-      <div>SAP</div><div><span id="sap" class="pill">—</span></div>
-      <div>ชื่อผู้แลก</div><div><span id="name" class="pill muted">กำลังดึง...</span></div>
-      <div>รางวัล</div><div><span id="reward" class="pill">—</span></div>
-      <div>แต้มที่ใช้</div><div><span id="points" class="pill">—</span></div>
+    <div id="detail" style="margin-top:12px" class="kv">
+      <div>SAP</div><div id="sap">—</div>
+      <div>ชื่อผู้แลก</div><div id="name" class="muted">กำลังดึง...</div>
+      <div>รางวัล</div><div id="reward">—</div>
+      <div>แต้มที่ใช้</div><div id="points">—</div>
     </div>
 
-    <div class="row">
+    <div class="row" style="margin-top:14px">
       <label for="adminSel" class="muted">รับแลกโดย</label>
-      <select id="adminSel">
+      <select id="adminSel" style="min-width:220px">
         <option value="">— เลือกแอดมิน —</option>
       </select>
-    </div>
-
-    <div class="row">
       <button id="btnConfirm">ยืนยันการแลก</button>
-      <button id="btnCancel" class="secondary" type="button">ยกเลิก</button>
     </div>
 
-    <div id="status" class="muted"></div>
-  </div>
-
-  <div class="footer">
-    © 2025 | ภาควิชาวิสัญญีวิทยา คณะแพทยศาสตร์ศิริราชพยาบาล<br/>
-    Version 1.0 by Zuree.Yoo
+    <div id="status" class="muted" style="margin-top:10px"></div>
   </div>
 
 <script type="module">
@@ -97,13 +105,15 @@ import { getDatabase, ref, get } from "https://www.gstatic.com/firebasejs/10.12.
 
 /* ===== CONFIG ===== */
 const firebaseConfig = {
-apiKey: "AIzaSyCMTpAce-Q-fTkS7xDDYuEpPwgtBIrDP04",
+  apiKey: "AIzaSyCMTpAce-Q-fTkS7xDDYuEpPwgtBIrDP04",
   authDomain: "anespoint-bfd3d.firebaseapp.com",
   databaseURL: "https://anesaplus-default-rtdb.asia-southeast1.firebasedatabase.app",
   projectId: "anespoint-bfd3d",
   appId: "1:1234567890:web:abcdef123456"
 };
+// 👉 เปลี่ยนให้ตรงกับ Deploy ล่าสุดของ Apps Script ( /exec )
 const GAS_ENDPOINT = "https://script.google.com/macros/s/AKfycbxF1vw8ZjfbzDw6WzhfJT1b-f9lh4FIbRAuZYmRkq07-YpMIWTuBBTZuvrhTu-PlEOiEQ/exec";
+
 
 const app = initializeApp(firebaseConfig);
 const db  = getDatabase(app);
@@ -111,105 +121,63 @@ const db  = getDatabase(app);
 const $ = q => document.querySelector(q);
 const fmt = n => Number(n||0).toLocaleString('th-TH');
 
-function setStatus(text, type){
-  const el = $('#status');
-  el.textContent = text || '';
-  el.classList.remove('ok','bad','muted');
-  el.classList.add(type === 'ok' ? 'ok' : type === 'bad' ? 'bad' : 'muted');
-}
-
-function setStatusHtml(html, type){
-  const el = $('#status');
-  el.innerHTML = html || '';
-  el.classList.remove('ok','bad','muted');
-  el.classList.add(type === 'ok' ? 'ok' : type === 'bad' ? 'bad' : 'muted');
-}
-
+/* ===== JSONP helper ===== */
 function api(body){
   return new Promise((resolve,reject)=>{
     const cb='cb_'+Math.random().toString(36).slice(2);
-    let s = null;
-    const timer = setTimeout(()=>{
-      try{ delete window[cb]; }catch(_e){}
-      try{ if(s) s.remove(); }catch(_e){}
-      reject(new Error('timeout'));
-    }, 25000);
-
-    window[cb]=d=>{
-      clearTimeout(timer);
-      resolve(d);
-      delete window[cb];
-      if(s) s.remove();
-    };
-
-    const qs=new URLSearchParams({...body,callback:cb,_t:Date.now()}).toString();
-    s=document.createElement('script');
+    window[cb]=d=>{ resolve(d); delete window[cb]; s.remove(); };
+    const qs=new URLSearchParams({...body,callback:cb}).toString();
+    const s=document.createElement('script');
     s.src=`${GAS_ENDPOINT}?${qs}`;
-    s.onerror=()=>{
-      clearTimeout(timer);
-      try{ delete window[cb]; }catch(_e){}
-      reject(new Error('GAS error'));
-    };
+    s.onerror=()=>reject(new Error('GAS error'));
     document.body.appendChild(s);
   });
 }
 
+/* ===== payload จาก QR ===== */
 function decodePayload(){
   try{
     const params=new URLSearchParams(location.hash.slice(1));
-    const b64=params.get('p');
-    if(!b64) return null;
+    const b64=params.get('p'); if(!b64) return null;
     const json=decodeURIComponent(escape(window.atob(b64)));
     return JSON.parse(json);
-  }catch(e){
-    return null;
-  }
+  }catch(e){ return null; }
 }
 
+/* ===== โหลดรายชื่อแอดมิน ===== */
 async function loadAdmins(){
   const sel = $('#adminSel');
   sel.innerHTML = '<option value="">— เลือกแอดมิน —</option>';
   let list = null;
   try{
-    const r = await api({action:'getAdmins', source:'admin_redeem'});
-    if(r && r.ok && Array.isArray(r.items) && r.items.length) list = r.items;
-  }catch(_e){}
-  if(!list) list = ['ดุษฎี  อรรจน์อังกูร','จุฑาวุฒิ  อุ่นอมรมาศ','ANES-Front'];
+    const r = await api({action:'getAdmins'});
+    if(r && r.ok && Array.isArray(r.items) && r.items.length){ list = r.items; }
+  }catch(_){}
+  if(!list){ list = ['ดุษฎี  อรรจน์อังกูร','จุฑาวุฒิ  อุ่นอมรมาศ','ANES-Front']; }
   list.forEach(name=>{
     const opt=document.createElement('option');
-    opt.value=name;
-    opt.textContent=name;
-    sel.appendChild(opt);
+    opt.value=name; opt.textContent=name; sel.appendChild(opt);
   });
 }
 
+/* ===== ตรวจ version ของปลายทาง (กันยิงผิดตัว) ===== */
 async function checkVersion(){
   try{
-    const r = await api({action:'version', source:'admin_redeem'});
-    $('#ver').textContent = (r && r.ok) ? 'เชื่อมต่อฐานข้อมูล' : 'เชื่อมต่อ Apps Script ไม่สำเร็จ';
+    const r = await api({action:'version'});
+    if(r && r.ok){
+      $('#ver').textContent = `เชื่อมต่อฐานข้อมูล`;
+    }else{
+      $('#ver').textContent = 'เชื่อมต่อ Apps Script ไม่สำเร็จ';
+    }
   }catch(e){
     $('#ver').textContent = 'เชื่อมต่อ Apps Script ไม่สำเร็จ';
   }
 }
 
-function errorText(r){
-  const code = r && r.error ? String(r.error) : '';
-  if(code === 'feature_closed') return 'ไม่สามารถบันทึกได้: ระบบฝั่ง Apps Script ยังเป็นเวอร์ชันเก่าที่บล็อก Admin confirmation กรุณาอัปเดต Apps Script แล้ว Deploy เป็น New version';
-  if(code === 'reward_inactive') return 'ไม่สามารถบันทึกได้: รางวัลนี้ถูกปิด Active ในชีต Rewards';
-  if(code === 'out_of_stock') return 'ไม่สามารถบันทึกได้: สต็อกรางวัลหมดแล้ว';
-  if(code === 'not_enough_points') return 'ไม่สามารถบันทึกได้: แต้มผู้ใช้ไม่พอ';
-  if(code === 'user_non_active') return 'ไม่สามารถบันทึกได้: ผู้ใช้ไม่ได้อยู่ในสถานะ Active';
-  if(code === 'user_not_found') return 'ไม่สามารถบันทึกได้: ไม่พบ SAP ในชีต Users';
-  if(code === 'reward_not_found') return 'ไม่สามารถบันทึกได้: ไม่พบรางวัลในชีต Rewards';
-  if(code === 'missing_params') return 'ไม่สามารถบันทึกได้: ข้อมูลจาก QR ไม่ครบ';
-  return 'ไม่สำเร็จ: ' + (code || 'เกิดข้อผิดพลาด');
-}
-
+/* ===== main ===== */
 const data = decodePayload();
-
 if(!data){
-  setStatus('ไม่พบข้อมูลจาก QR', 'bad');
-  $('#name').textContent = '—';
+  $('#status').textContent = 'ไม่พบข้อมูลจาก QR';
 }else{
   $('#sap').textContent    = data.sap || '—';
   $('#reward').textContent = data.reward || '—';
@@ -218,74 +186,46 @@ if(!data){
     const snap = await get(ref(db, 'public/usersSummary/'+data.sap));
     const v = snap.exists() ? snap.val() : {};
     $('#name').textContent = v.name || '(ไม่พบชื่อในระบบ)';
-    $('#name').classList.remove('muted');
-    $('#name').classList.add(snap.exists() ? 'ok' : 'bad');
+    if(!snap.exists()){ $('#name').classList.add('bad'); } else { $('#name').classList.add('ok'); }
   }catch(e){
-    $('#name').textContent = '(อ่านชื่อไม่สำเร็จ)';
-    $('#name').classList.remove('muted');
-    $('#name').classList.add('bad');
+    $('#name').textContent = '(อ่านชื่อไม่สำเร็จ)'; $('#name').classList.add('bad');
   }
 }
-
 await checkVersion();
 await loadAdmins();
 
+/* ===== ยืนยันการแลก (ลองส่ง 3 รูปแบบ: action / act / a) ===== */
 async function confirmRedeem(payload){
-  // ส่ง action หลักก่อน และคง fallback เดิมเพื่อไม่กระทบ backend เก่า
-  let r = await api({action:'confirmRedeem', adminConfirm:'1', source:'admin_qr', ...payload});
-  if(r && (r.ok || r.error !== 'unknown_action')) return r;
+  // 1) action
+  let r = await api({action:'confirmRedeem', ...payload});
+  if(r && (r.ok || r.error!=='unknown_action')) return r;
 
-  r = await api({act:'confirmRedeem', adminConfirm:'1', source:'admin_qr', ...payload});
-  if(r && (r.ok || r.error !== 'unknown_action')) return r;
+  // 2) act
+  r = await api({act:'confirmRedeem', ...payload});
+  if(r && (r.ok || r.error!=='unknown_action')) return r;
 
-  r = await api({a:'confirmRedeem', adminConfirm:'1', source:'admin_qr', ...payload});
+  // 3) a
+  r = await api({a:'confirmRedeem', ...payload});
   return r;
 }
-
-$('#btnCancel').onclick = ()=>{
-  try{ window.close(); }catch(_e){}
-  history.back();
-};
 
 $('#btnConfirm').onclick = async()=>{
   if(!data) return;
   const admin = $('#adminSel').value.trim();
-  if(!admin){
-    setStatus('กรุณาเลือกแอดมิน', 'bad');
-    return;
-  }
+  if(!admin){ $('#status').textContent = 'กรุณาเลือกแอดมิน'; return; }
+  $('#status').textContent='กำลังยืนยัน...';
 
-  const ok = confirm(`ยืนยันการแลก\n\nSAP: ${data.sap || '-'}\nรางวัล: ${data.reward || '-'}\nแต้มที่ใช้: ${fmt(data.pts || 0)}\nรับแลกโดย: ${admin}`);
-  if(!ok) return;
+  const payload = { sap:data.sap, rewardName:data.reward, admin, ts:data.ts, points:data.pts };
+  const r = await confirmRedeem(payload);
 
-  $('#btnConfirm').disabled = true;
-  $('#adminSel').disabled = true;
-  setStatus('กำลังยืนยัน...', 'muted');
-
-  try{
-    const payload = {
-      sap:data.sap,
-      rewardName:data.reward,
-      reward:data.reward,
-      admin:admin,
-      adminName:admin,
-      ts:data.ts || '',
-      points:data.pts,
-      pts:data.pts
-    };
-    const r = await confirmRedeem(payload);
-
-    if(r && r.ok){
-      setStatusHtml(`สำเร็จ ✓ | แต้มคงเหลือผู้ใช้: <b>${fmt(r.totalAfter)}</b> | สต็อกรางวัลคงเหลือ: <b>${fmt(r.stockAfter)}</b>`, 'ok');
-    }else{
-      setStatus(errorText(r), 'bad');
-      $('#btnConfirm').disabled = false;
-      $('#adminSel').disabled = false;
-    }
-  }catch(e){
-    setStatus('ไม่สำเร็จ: เชื่อมต่อ Apps Script ไม่สำเร็จหรือหมดเวลา', 'bad');
-    $('#btnConfirm').disabled = false;
-    $('#adminSel').disabled = false;
+  if(r && r.ok){
+    $('#status').innerHTML = `สำเร็จ ✓ | แต้มคงเหลือผู้ใช้: <b>${fmt(r.totalAfter)}</b> | สต็อกรางวัลคงเหลือ: <b>${fmt(r.stockAfter)}</b>`;
+    $('#status').classList.remove('bad'); $('#status').classList.add('ok');
+    $('#btnConfirm').disabled = true; $('#adminSel').disabled = true;
+  }else{
+    const extra = r && (r.received || (r.echo ? JSON.stringify(r.echo) : ""));
+    $('#status').textContent = 'ไม่สำเร็จ: ' + (r && r.error ? r.error : 'เกิดข้อผิดพลาด') + (extra ? ` (${extra})` : '');
+    $('#status').classList.remove('ok'); $('#status').classList.add('bad');
   }
 };
 </script>
