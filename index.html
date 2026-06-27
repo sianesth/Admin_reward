@@ -56,7 +56,7 @@
 
 <footer style="text-align:center;color:#8b94b2;font-size:11px;margin:8px 0">
   © 2025 | ภาควิชาวิสัญญีวิทยา คณะแพทยศาสตร์ศิริราชพยาบาล<br>
-  <span style="font-size:10px;opacity:.85">Version 1.1.0 Redeem Acknowledgement Recovery</span>
+  <span style="font-size:10px;opacity:.85">Version 1.2.0 Sheet-First Fast Confirm</span>
 </footer>
 
 <script>
@@ -78,6 +78,7 @@ function explain(err){
   if(e === 'not_enough_points') return 'แต้มไม่เพียงพอ';
   if(e === 'points_less_than_required') return 'แต้มที่ใช้ไม่ครบตามรางวัล';
   if(e === 'feature_closed') return 'ระบบแลกรางวัลฝั่งผู้ใช้ปิดอยู่';
+  if(e === 'system_busy') return 'ระบบกำลังบันทึกรายการอื่นอยู่ ระบบจะลองยืนยันให้อัตโนมัติ';
   return 'ไม่สามารถบันทึกได้ (' + (err || 'unknown') + ')';
 }
 function setMessage(text, kind){
@@ -225,12 +226,34 @@ async function loadAdmins(){
 
 /* ========= request / recovery ========= */
 async function confirmRedeemViaGAS(payload){
-  let r = await jsonp({ action:'confirmRedeem', ...payload }, 60000);
-  if(r && (r.ok || r.error !== 'unknown_action')) return r;
-  r = await jsonp({ act:'confirmRedeem', ...payload }, 60000);
-  if(r && (r.ok || r.error !== 'unknown_action')) return r;
-  return jsonp({ a:'confirmRedeem', ...payload }, 60000);
+  /* The server now commits Sheets first and returns before Firebase work.
+     A short retry handles an active Sheet lock without making Admin wait 45 s. */
+  let last = null;
+  for(let attempt = 0; attempt < 5; attempt++){
+    try{
+      const r = await jsonp({ action:'confirmRedeem', ...payload }, 12000);
+      last = r;
+      if(r && String(r.error || '').toLowerCase() === 'system_busy'){
+        await sleep(600 + (attempt * 350));
+        continue;
+      }
+      return r;
+    }catch(err){
+      if(attempt === 4) throw err;
+      await sleep(600 + (attempt * 350));
+    }
+  }
+  return last || { ok:false, error:'system_busy' };
 }
+/* Firebase sync is intentionally fire-and-forget: Admin success reflects
+   the durable Sheets transaction and never waits for Firebase/OAuth. */
+function kickRedeemRealtimeSync(data, redeemId){
+  jsonp({
+    action:'redeemsync', sap:data.sap, rewardName:data.reward, reward:data.reward,
+    points:data.pts, pts:data.pts, ts:data.ts, redeemId
+  }, 20000).catch(()=>{});
+}
+
 async function redeemStatusViaGAS(data, redeemId){
   try{
     const r = await jsonp({
@@ -368,6 +391,13 @@ function showChecking(){
       const res = await confirmRedeemViaGAS(payload);
       if(res && res.ok){
         showConfirmed(res, !!res.alreadyConfirmed);
+        kickRedeemRealtimeSync(data, redeemId);
+        return;
+      }
+      if(res && String(res.error || '').toLowerCase() === 'system_busy'){
+        showChecking();
+        setMessage('⚠️ ระบบกำลังจัดคิวรายการอื่นอยู่ กรุณารอ 3–5 วินาทีแล้วกด “ตรวจสอบสถานะ” โดยไม่ต้องกดยืนยันซ้ำ', 'hint');
+        locking = false;
         return;
       }
       unlockBusinessError();
