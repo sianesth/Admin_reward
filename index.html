@@ -47,6 +47,7 @@
     <div class="row mt">
       <button id="btnConfirm" class="btn">ยืนยันแลก</button>
       <button id="btnCancel" type="button">ยกเลิก</button>
+      <button id="btnCheck" type="button" style="display:none">ตรวจสอบสถานะ</button>
     </div>
 
     <p id="msg" class="mt hint"></p>
@@ -55,7 +56,7 @@
 
 <footer style="text-align:center;color:#8b94b2;font-size:11px;margin:8px 0">
   © 2025 | ภาควิชาวิสัญญีวิทยา คณะแพทยศาสตร์ศิริราชพยาบาล<br>
-  <span style="font-size:10px;opacity:.85">Version 1.0.1 Redeem Fix by Zuree.Yoo</span>
+  <span style="font-size:10px;opacity:.85">Version 1.1.0 Redeem Acknowledgement Recovery</span>
 </footer>
 
 <script>
@@ -65,124 +66,147 @@ const DB_URL  = "https://anesaplus-default-rtdb.asia-southeast1.firebasedatabase
 
 /* ========= helpers ========= */
 function $(id){ return document.getElementById(id); }
-function fmt(n){ return Number(n||0).toLocaleString('th-TH'); }
+function fmt(n){ return Number(n || 0).toLocaleString('th-TH'); }
+function sleep(ms){ return new Promise(resolve => setTimeout(resolve, ms)); }
 function explain(err){
-  const e = String(err||'').toLowerCase();
-  if(e==='missing_params')    return 'ข้อมูลไม่ครบ (SAP, รางวัล, แต้ม, แอดมิน)';
-  if(e==='user_not_found')    return 'ไม่พบผู้ใช้ในระบบ';
-  if(e==='reward_not_found')  return 'ไม่พบชื่อรางวัล';
-  if(e==='out_of_stock')      return 'ของรางวัลหมดสต็อก';
-  if(e==='not_enough_points') return 'แต้มไม่เพียงพอ';
-  if(e==='feature_closed')     return 'ระบบปิดโหมดแลกรางวัลฝั่งผู้ใช้ แต่หน้า Admin เวอร์ชันแก้ไขจะยังยืนยัน QR ที่สร้างแล้วได้ กรุณาอัปเดต Apps Script เป็นไฟล์ REDEEM_FIX_FINAL';
-  return 'ไม่สามารถบันทึกได้ ('+(err||'unknown')+')';
+  const e = String(err || '').toLowerCase();
+  if(e === 'missing_params') return 'ข้อมูลไม่ครบ (SAP, รางวัล, แต้ม, แอดมิน)';
+  if(e === 'user_not_found') return 'ไม่พบผู้ใช้ในระบบ';
+  if(e === 'user_non_active') return 'ผู้ใช้อยู่สถานะไม่พร้อมใช้งาน';
+  if(e === 'reward_not_found') return 'ไม่พบชื่อรางวัล';
+  if(e === 'out_of_stock') return 'ของรางวัลหมดสต็อก';
+  if(e === 'not_enough_points') return 'แต้มไม่เพียงพอ';
+  if(e === 'points_less_than_required') return 'แต้มที่ใช้ไม่ครบตามรางวัล';
+  if(e === 'feature_closed') return 'ระบบแลกรางวัลฝั่งผู้ใช้ปิดอยู่';
+  return 'ไม่สามารถบันทึกได้ (' + (err || 'unknown') + ')';
+}
+function setMessage(text, kind){
+  const msg = $('msg');
+  msg.className = 'mt ' + (kind || 'hint');
+  msg.textContent = text;
+}
+function setMessageHtml(html, kind){
+  const msg = $('msg');
+  msg.className = 'mt ' + (kind || 'hint');
+  msg.innerHTML = html;
+}
+function escapeHtml(v){
+  return String(v == null ? '' : v)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;').replace(/'/g,'&#039;');
 }
 
 /* JSONP สำหรับ Apps Script */
-function jsonp(params){
-  return new Promise((resolve,reject)=>{
-    const cb = "cb_"+Math.random().toString(36).slice(2);
-    params = {...params, callback: cb};
-    const url = GAS_URL + "?" + new URLSearchParams(params).toString();
-    const s = document.createElement("script");
-    const timer = setTimeout(()=>{ cleanup(); reject(new Error("timeout")); }, 15000);
-    function cleanup(){ delete window[cb]; try{s.remove();}catch{} clearTimeout(timer); }
-    window[cb] = (res)=>{ cleanup(); resolve(res); };
-    s.onerror = ()=>{ cleanup(); reject(new Error("network_error")); };
-    s.src = url; document.body.appendChild(s);
+function jsonp(params, timeoutMs){
+  return new Promise((resolve, reject) => {
+    const cb = 'cb_' + Math.random().toString(36).slice(2);
+    const query = new URLSearchParams({ ...params, callback: cb, _: Date.now().toString() });
+    const s = document.createElement('script');
+    const timeout = Number(timeoutMs || 15000);
+    let settled = false;
+    const timer = setTimeout(() => fail(new Error('timeout')), timeout);
+    function cleanup(){
+      try { delete window[cb]; } catch(_) { window[cb] = undefined; }
+      try { s.remove(); } catch(_) {}
+      clearTimeout(timer);
+    }
+    function finish(value){
+      if(settled) return;
+      settled = true;
+      cleanup();
+      resolve(value);
+    }
+    function fail(err){
+      if(settled) return;
+      settled = true;
+      cleanup();
+      reject(err);
+    }
+    window[cb] = finish;
+    s.onerror = () => fail(new Error('network_error'));
+    s.src = GAS_URL + '?' + query.toString();
+    document.body.appendChild(s);
   });
 }
 
-/* ========= decode payload จาก QR (ยืดหยุ่นหลายคีย์) ========= */
+/* ========= decode payload จาก QR ========= */
 function decodePayload(){
-  const first = (...xs)=> xs.find(v=> (v!==undefined && v!==null && String(v).trim()!=='')) ?? '';
-
-  // hash: #p=base64(json)
+  const first = (...xs) => xs.find(v => v !== undefined && v !== null && String(v).trim() !== '') ?? '';
   try{
     const hp = new URLSearchParams(location.hash.slice(1));
     const b64 = hp.get('p');
     if(b64){
       const json = decodeURIComponent(escape(window.atob(b64)));
       const o = JSON.parse(json);
-      const sap    = first(o.sap, o.SAP, o.userSap, o.user, o.uid);
+      const sap = first(o.sap, o.SAP, o.userSap, o.user, o.uid);
       const reward = first(o.rewardName, o.reward, o.rewardTitle, o.title, o.label, o.name);
-      const pts    = Number(first(o.points, o.pts, o.pointsRequired, o.cost, o.needPoints, o.requiredPoints, o.required));
-      const ts     = first(o.ts, o.timestamp, o.time);
-      return { sap:String(sap||'').trim(), reward:String(reward||'').trim(), pts:(isNaN(pts)?0:pts), ts:String(ts||'').trim() };
+      const pts = Number(first(o.points, o.pts, o.pointsRequired, o.cost, o.needPoints, o.requiredPoints, o.required));
+      const ts = first(o.ts, o.timestamp, o.time);
+      return { sap:String(sap || '').trim(), reward:String(reward || '').trim(), pts:isNaN(pts) ? 0 : pts, ts:String(ts || '').trim() };
     }
   }catch(_){}
-
-  // query: ?sap=...&reward=...&points=...
   const q = new URLSearchParams(location.search);
-  const sap    = first(q.get('sap'), q.get('SAP'), q.get('userSap'), q.get('user'), q.get('uid'));
+  const sap = first(q.get('sap'), q.get('SAP'), q.get('userSap'), q.get('user'), q.get('uid'));
   const reward = first(q.get('rewardName'), q.get('reward'), q.get('rewardTitle'), q.get('title'), q.get('label'), q.get('name'));
-  const pts    = Number(first(q.get('points'), q.get('pts'), q.get('pointsRequired'), q.get('cost'), q.get('needPoints'), q.get('requiredPoints'), q.get('required')));
-  const ts     = first(q.get('ts'), q.get('timestamp'), q.get('time'));
-  return { sap:String(sap||'').trim(), reward:String(reward||'').trim(), pts:(isNaN(pts)?0:pts), ts:String(ts||'').trim() };
+  const pts = Number(first(q.get('points'), q.get('pts'), q.get('pointsRequired'), q.get('cost'), q.get('needPoints'), q.get('requiredPoints'), q.get('required')));
+  const ts = first(q.get('ts'), q.get('timestamp'), q.get('time'));
+  return { sap:String(sap || '').trim(), reward:String(reward || '').trim(), pts:isNaN(pts) ? 0 : pts, ts:String(ts || '').trim() };
 }
 
-/* ========= RTDB: ดึงชื่อผู้ใช้ ========= */
+/* ========= deterministic redeem id =========
+ * ใช้ QR เดิม = id เดิมเสมอ เพื่อให้ retry/timeout ไม่ตัดแต้มซ้ำ */
+function fnv1a(str){
+  let h = 0x811c9dc5;
+  for(let i=0; i<str.length; i++){
+    h ^= str.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return (h >>> 0).toString(36);
+}
+function redeemIdFor(data){
+  const key = 'anesa_redeem_id:' + location.href;
+  try{
+    const stored = sessionStorage.getItem(key);
+    if(stored) return stored;
+  }catch(_){}
+  const seed = [data.sap, data.reward, data.pts, data.ts || location.href].join('|');
+  const id = 'redeem_' + fnv1a(seed) + '_' + fnv1a(seed.split('').reverse().join(''));
+  try { sessionStorage.setItem(key, id); } catch(_) {}
+  return id;
+}
+
+/* ========= RTDB reads ========= */
 async function fetchUserNameFromRTDB(sap){
   if(!sap) return null;
   try{
     const r = await fetch(`${DB_URL}/public/usersSummary/${encodeURIComponent(sap)}.json?t=${Date.now()}`, {cache:'no-store'});
     if(!r.ok) return null;
     const v = await r.json();
-    if(v && typeof v==='object') return v.name || v.Name || null;
-  }catch(_){}
-  return null;
+    return v && typeof v === 'object' ? (v.name || v.Name || null) : null;
+  }catch(_){ return null; }
 }
-
-/* ========= RTDB: ดึงแต้มคงเหลือผู้ใช้ ========= */
-async function fetchUserPointsFromRTDB(sap){
-  if(!sap) return null;
+async function fetchRedeemReceipt(redeemId){
+  if(!redeemId) return null;
   try{
-    const r = await fetch(`${DB_URL}/public/usersSummary/${encodeURIComponent(sap)}.json?t=${Date.now()}`, {cache:'no-store'});
+    const r = await fetch(`${DB_URL}/public/redeemReceipts/${encodeURIComponent(redeemId)}.json?t=${Date.now()}`, {cache:'no-store'});
     if(!r.ok) return null;
     const v = await r.json();
-    if(v && typeof v==='object'){
-      return v.pointsTotal ?? v.PointsTotal ?? v.total ?? v.balance ?? null;
-    }
-  }catch(_){}
-  return null;
+    return v && typeof v === 'object' && (v.confirmed === true || v.status === 'CONFIRMED') ? v : null;
+  }catch(_){ return null; }
 }
 
-/* ========= RTDB: ดึงสต็อกรางวัลคงเหลือ ========= */
-async function fetchRewardStockFromRTDB(rewardName){
-  if(!rewardName) return null;
-  try{
-    const r = await fetch(`${DB_URL}/public/rewards/${encodeURIComponent(rewardName)}.json?t=${Date.now()}`, {cache:'no-store'});
-    if(r.ok){
-      const v = await r.json();
-      if(v && typeof v==='object'){
-        return v.stock ?? v.Stock ?? v.qty ?? v.Qty ?? null;
-      }
-    }
-  }catch(_){}
-  return null;
-}
-
-/* ========= retry helper กันดีเลย์ ========= */
-async function retry(fn, times=6, delay=250){
-  for(let i=0;i<times;i++){
-    const v = await fn();
-    if(v !== null && v !== undefined && v !== '') return v;
-    await new Promise(r=>setTimeout(r, delay));
-  }
-  return null;
-}
-
-/* ========= โหลดรายชื่อแอดมินจากชีต getAdmins/Admins ========= */
+/* ========= Admin list ========= */
 async function loadAdmins(){
-  const sel = $("adminSelect");
+  const sel = $('adminSelect');
   sel.innerHTML = '<option value="">— เลือกชื่อแอดมิน —</option>';
   try{
-    const res = await jsonp({ action: "getAdmins" }); // server จะ toLowerCase → 'getadmins'
+    const res = await jsonp({ action:'getAdmins' }, 15000);
     const items = (res && res.items) || [];
     if(Array.isArray(items) && items.length){
       for(const it of items){
-        const name = (it.name || it).toString();
+        const name = String(it.name || it || '');
         const opt = document.createElement('option');
-        opt.value = (it.sap || '').toString(); // value = SAP (ปลอดภัยกว่า)
+        opt.value = String(it.sap || '');
         opt.dataset.name = name;
         opt.textContent = it.sap ? `${name} (${it.sap})` : name;
         sel.appendChild(opt);
@@ -190,131 +214,178 @@ async function loadAdmins(){
       return;
     }
   }catch(_){}
-  // fallback เผื่อเรียกลิสต์ไม่ได้
-  sel.insertAdjacentHTML('beforeend','<option value="Tachawan">Tachawan</option>');
-  sel.insertAdjacentHTML('beforeend','<option value="Dudsadee">Dudsadee</option>');
-  sel.insertAdjacentHTML('beforeend','<option value="Juthawut">Juthawut</option>');
+  ['Tachawan','Dudsadee','Juthawut'].forEach(name => {
+    const opt = document.createElement('option');
+    opt.value = name;
+    opt.dataset.name = name;
+    opt.textContent = name;
+    sel.appendChild(opt);
+  });
 }
 
-/* ========= เรียกยืนยันแลกไป GAS ========= */
+/* ========= request / recovery ========= */
 async function confirmRedeemViaGAS(payload){
-  let r = await jsonp({ action:'confirmRedeem', ...payload });
-  if(r && (r.ok || r.error!=='unknown_action')) return r;
-  r = await jsonp({ act:'confirmRedeem', ...payload });
-  if(r && (r.ok || r.error!=='unknown_action')) return r;
-  r = await jsonp({ a:'confirmRedeem', ...payload });
-  return r;
+  let r = await jsonp({ action:'confirmRedeem', ...payload }, 60000);
+  if(r && (r.ok || r.error !== 'unknown_action')) return r;
+  r = await jsonp({ act:'confirmRedeem', ...payload }, 60000);
+  if(r && (r.ok || r.error !== 'unknown_action')) return r;
+  return jsonp({ a:'confirmRedeem', ...payload }, 60000);
+}
+async function redeemStatusViaGAS(data, redeemId){
+  try{
+    const r = await jsonp({
+      action:'redeemstatus', sap:data.sap, rewardName:data.reward, points:data.pts,
+      ts:data.ts, redeemId
+    }, 15000);
+    return r && r.confirmed ? r : null;
+  }catch(_){ return null; }
+}
+async function waitForRedeemReceipt(data, redeemId, tries, delay){
+  const n = Number(tries || 12);
+  for(let i=0; i<n; i++){
+    const receipt = await fetchRedeemReceipt(redeemId);
+    if(receipt) return receipt;
+    if(i < n - 1) await sleep(Number(delay || 1500));
+  }
+  return redeemStatusViaGAS(data, redeemId);
+}
+
+/* ========= UI state ========= */
+function lockConfirmed(){
+  $('btnConfirm').disabled = true;
+  $('btnCancel').disabled = true;
+  $('btnCheck').style.display = 'none';
+  $('adminName').disabled = true;
+  $('adminSelect').disabled = true;
+}
+function unlockBusinessError(){
+  $('btnConfirm').disabled = false;
+  $('btnCancel').disabled = false;
+}
+function showConfirmed(res, recovered){
+  const total = res && res.totalAfter;
+  const stock = res && res.stockAfter;
+  const suffix = recovered ? '<br><span class="hint">ตรวจพบรายการที่บันทึกสำเร็จแล้วจากฐานข้อมูล</span>' : '';
+  setMessageHtml(
+    `✅ ดำเนินการแลกรางวัลสำเร็จ<br>แต้มคงเหลือผู้ใช้: <b>${total === null || total === undefined ? '—' : fmt(total)}</b> | สต็อกรางวัลคงเหลือ: <b>${stock === null || stock === undefined ? '—' : fmt(stock)}</b>${suffix}`,
+    'ok'
+  );
+  lockConfirmed();
+}
+function showChecking(){
+  $('btnConfirm').disabled = true;
+  $('btnCancel').disabled = false;
+  $('btnCheck').style.display = '';
+  setMessage('⚠️ ยังไม่ได้รับผลตอบกลับจากหน้าเว็บ ระบบกำลังตรวจสอบรายการที่บันทึกไว้ กรุณาอย่ากดยืนยันซ้ำ', 'hint');
 }
 
 /* ========= MAIN ========= */
-(async ()=>{
+(async () => {
   const data = decodePayload();
-  $("sap").textContent    = data.sap || "—";
-  $("reward").textContent = data.reward || "—";
-  $("points").textContent = data.pts ? fmt(data.pts) : "—";
+  const redeemId = redeemIdFor(data);
+  $('sap').textContent = data.sap || '—';
+  $('reward').textContent = data.reward || '—';
+  $('points').textContent = data.pts ? fmt(data.pts) : '—';
 
-  // ชื่อผู้ใช้: RTDB → fallback GAS
   let userName = await fetchUserNameFromRTDB(data.sap);
   if(!userName){
     try{
-      const r = await jsonp({ action:'userstatus', sap:data.sap });
-      userName = (r && r.name) || null;
+      const r = await jsonp({ action:'userstatus', sap:data.sap }, 15000);
+      userName = r && r.name ? r.name : null;
     }catch(_){}
   }
-  $("userName").textContent = userName || "—";
-
+  $('userName').textContent = userName || '—';
   await loadAdmins();
 
-  // sync input กับ select
-  $("adminSelect").addEventListener("change", e=>{
+  $('adminSelect').addEventListener('change', e => {
     const sel = e.target;
-    const sap = (sel.value || "").trim();
+    const sap = String(sel.value || '').trim();
     const opt = sel.options[sel.selectedIndex];
-    const name = (opt && opt.dataset && opt.dataset.name) ? String(opt.dataset.name) : "";
+    const name = opt && opt.dataset ? String(opt.dataset.name || '').trim() : '';
     if(sap){
-      $("adminSAP").value = sap;
-      if(name) $("adminName").value = name;
+      $('adminSAP').value = sap;
+      if(name) $('adminName').value = name;
     }
   });
 
   let locking = false;
 
-  $("btnConfirm").addEventListener("click", async ()=>{
+  async function verifyOnly(){
     if(locking) return;
-    const msg = $("msg");
-    msg.className = "mt hint";
-
-    if(!data.sap || !data.reward || !data.pts){
-      msg.textContent = "❌ ข้อมูลไม่ครบจาก QR"; return;
-    }
-    const adminNameInput = $("adminName").value.trim();
-    const adminSAP = $("adminSAP").value.trim() || $("adminSelect").value.trim();
-    const opt = $("adminSelect").options[$("adminSelect").selectedIndex];
-    const adminNameAuto = (opt && opt.dataset && opt.dataset.name) ? String(opt.dataset.name).trim() : "";
-    const adminName = adminNameInput || adminNameAuto;
-    if(!adminName && !adminSAP){ msg.textContent = "กรุณาเลือก/พิมพ์ชื่อแอดมิน"; $("adminName").focus(); return; }
-
-    // disable ระหว่างบันทึก (กันเผลอกดยกเลิก)
-    $("btnConfirm").disabled = true;
-    $("btnCancel").disabled  = true;
     locking = true;
-    msg.textContent = "กำลังบันทึก…";
+    $('btnCheck').disabled = true;
+    setMessage('กำลังตรวจสอบสถานะการยืนยัน…', 'hint');
+    const receipt = await waitForRedeemReceipt(data, redeemId, 4, 1200);
+    if(receipt){
+      showConfirmed(receipt, true);
+    }else{
+      $('btnCheck').disabled = false;
+      setMessage('⚠️ ยังไม่พบผลยืนยัน กรุณารอสักครู่แล้วกด “ตรวจสอบสถานะ” อีกครั้ง โดยไม่ต้องกดยืนยันแลกซ้ำ', 'hint');
+    }
+    locking = false;
+  }
+
+  $('btnCheck').addEventListener('click', verifyOnly);
+
+  /* หากเปิด QR เดิมซ้ำหลังยืนยันแล้ว ให้แสดงสำเร็จทันทีและกันตัดซ้ำ */
+  const existing = await fetchRedeemReceipt(redeemId);
+  if(existing){
+    showConfirmed(existing, true);
+    return;
+  }
+
+  $('btnConfirm').addEventListener('click', async () => {
+    if(locking) return;
+    if(!data.sap || !data.reward || !data.pts){
+      setMessage('❌ ข้อมูลไม่ครบจาก QR', 'err');
+      return;
+    }
+
+    const adminNameInput = $('adminName').value.trim();
+    const adminSAP = $('adminSAP').value.trim() || $('adminSelect').value.trim();
+    const opt = $('adminSelect').options[$('adminSelect').selectedIndex];
+    const adminNameAuto = opt && opt.dataset ? String(opt.dataset.name || '').trim() : '';
+    const adminName = adminNameInput || adminNameAuto;
+    if(!adminName && !adminSAP){
+      setMessage('กรุณาเลือกหรือพิมพ์ชื่อแอดมิน', 'err');
+      $('adminName').focus();
+      return;
+    }
+
+    locking = true;
+    $('btnConfirm').disabled = true;
+    $('btnCancel').disabled = true;
+    $('btnCheck').style.display = 'none';
+    setMessage('กำลังบันทึก…', 'hint');
+
+    const payload = {
+      sap:data.sap, rewardName:data.reward, reward:data.reward,
+      points:data.pts, pts:data.pts, adminName, adminSAP,
+      ts:data.ts, redeemId
+    };
 
     try{
-      const res = await confirmRedeemViaGAS({
-        sap: data.sap,
-        rewardName: data.reward,
-        points: data.pts,
-        adminName,
-        adminSAP,
-        ts: data.ts
-      });
-
+      const res = await confirmRedeemViaGAS(payload);
       if(res && res.ok){
-        // 1) ถ้า GAS ส่งค่ากลับมาก็ใช้เลย
-        let totalAfter = (res && ('totalAfter' in res)) ? res.totalAfter : null;
-        let stockAfter = (res && ('stockAfter' in res)) ? res.stockAfter : null;
-
-        // 2) ถ้าไม่มี → ไปดึงค่าล่าสุดจาก RTDB (ไม่แตะ Apps Script)
-        if(totalAfter === null || totalAfter === undefined){
-          totalAfter = await retry(()=>fetchUserPointsFromRTDB(data.sap));
-        }
-        if(stockAfter === null || stockAfter === undefined){
-          stockAfter = await retry(()=>fetchRewardStockFromRTDB(data.reward));
-        }
-
-        const afterTotalTxt = (totalAfter===null || totalAfter===undefined) ? '—' : fmt(totalAfter);
-        const afterStockTxt = (stockAfter===null || stockAfter===undefined) ? '—' : fmt(stockAfter);
-
-        msg.className = "mt ok";
-        msg.innerHTML = `✅ ดำเนินการแลกรางวัลสำเร็จ<br>
-        แต้มคงเหลือผู้ใช้: <b>${afterTotalTxt}</b> | สต็อกรางวัลคงเหลือ: <b>${afterStockTxt}</b>`;
-
-        // 🔒 ล็อกทั้งหมด: ต้องสแกน QR ใหม่เท่านั้น
-        $("btnConfirm").disabled = true;
-        $("btnCancel").disabled  = true;
-        $("adminName").disabled  = true;
-        $("adminSelect").disabled = true;
-        locking = true;
-
-      }else{
-        // fail → ปลดล็อกให้ลองใหม่ได้
-        $("btnConfirm").disabled = false;
-        $("btnCancel").disabled  = false;
-        locking = false;
-        msg.className = "mt err";
-        msg.textContent = "❌ " + explain(res && res.error);
+        showConfirmed(res, !!res.alreadyConfirmed);
+        return;
       }
-    }catch(e){
-      $("btnConfirm").disabled = false;
-      $("btnCancel").disabled  = false;
+      unlockBusinessError();
+      setMessage('❌ ' + explain(res && res.error), 'err');
       locking = false;
-      msg.className = "mt err";
-      msg.textContent = "❌ เกิดข้อผิดพลาดในการเชื่อมต่อ";
+    }catch(_){
+      /* ข้อสำคัญ: อย่าแจ้งว่า "ทำไม่สำเร็จ" ทันที เพราะ Sheet อาจบันทึกเสร็จแล้วแต่ callback มาช้า */
+      const receipt = await waitForRedeemReceipt(data, redeemId, 12, 1500);
+      if(receipt){
+        showConfirmed(receipt, true);
+        return;
+      }
+      showChecking();
+      locking = false;
     }
   });
 
-  $("btnCancel").addEventListener("click", ()=>history.back());
+  $('btnCancel').addEventListener('click', () => history.back());
 })();
 </script>
 </body>
